@@ -92,10 +92,9 @@ void ApplyAddAdditiveNoise(const int32 &SNR,
                            const Matrix<BaseFloat> &input_eg,
                            const Matrix<BaseFloat> &noise_eg,
                            Matrix<BaseFloat> *perturb_eg) {
-  // In the version, we ask the noise_cols >= input_cols. If mfcc, the cols are equal.
-  // If raw data, we ask the noise_cols > input_cols.
+  // In the version, we ask the noise_cols == input_cols.
   int32 input_rows = input_eg.NumRows(), input_cols = input_eg.NumCols();  
-  KALDI_ASSERT(noise_eg.NumCols() >= input_cols);
+  KALDI_ASSERT(noise_eg.NumCols() == input_cols);
 
   // According to the rows of noise_eg, form the noise_mat
   // repeat the noise_eg blocks to have a new block which is longer than input_eg
@@ -113,12 +112,11 @@ void ApplyAddAdditiveNoise(const int32 &SNR,
   }
 
   // select the noise range
-  int32 noise_rows = noise_mat.NumRows(), noise_cols = noise_mat.NumCols();
-  int32 start_row_ind = RandInt(0, noise_rows - input_rows),
-        start_col_ind = RandInt(0, noise_cols - input_cols); 
+  int32 noise_rows = noise_mat.NumRows();
+  int32 start_row_ind = RandInt(0, noise_rows - input_rows);
   Matrix<BaseFloat> selected_noise_mat(input_rows, input_cols);
   selected_noise_mat.AddMat(1.0, noise_mat.Range(start_row_ind, input_rows,
-                                                  start_col_ind, input_cols));
+                                                 0, input_cols));
   // compute the energy of noise and input
   Matrix<BaseFloat> input_energy_mat(input_rows, input_cols);
   input_energy_mat.AddMatMatElements(1.0, input_eg, input_eg, 1.0);
