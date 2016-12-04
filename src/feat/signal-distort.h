@@ -32,6 +32,7 @@
 #include "feat/resample.h"
 #include "matrix/matrix-functions.h"
 #include "cudamatrix/cu-matrix.h"
+#include "nnet3/nnet-example.h"
 
 namespace kaldi {
 
@@ -43,11 +44,15 @@ struct XvectorPerturbOptions {
   int32 negation_prop; 
   bool rand_distort;
   std::string noise_egs;
+  std::string add_noise_rspecifier;
+  int32 snr;
+
   XvectorPerturbOptions(): max_shift(0.2),
                            max_time_stretch(0.2),
                            frame_dim(80),
                            negation_prop(0.0),
-                           rand_distort(false) { }
+                           rand_distort(false),
+                           snr(10) { }
   void Register(OptionsItf *opts) { 
     opts->Register("max-shift", &max_shift, "Maximum random shift relative"
                 "to frame length applied to egs.");
@@ -59,6 +64,10 @@ struct XvectorPerturbOptions {
     opts->Register("noise-egs", &noise_egs, "If supplied, the additive noise is added to input signal.");
     opts->Register("rand_distort", &rand_distort, "If true, the signal is slightly changes"
                    "using some designed FIR filter with no zeros.");
+    opts->Register("add-noise", &add_noise_rspecifier, "specify a file contains some noise egs");
+    opts->Register("SNR",&snr,"specify a Signal to Noise Ration. We will scale the noise according"
+                "to the original signal and SNR. Normally, it's a non-zero number between -30 and 30"
+                "default=10");
   }
 };
 
@@ -70,7 +79,13 @@ class PerturbXvectorSignal {
                        Matrix<BaseFloat> *perturb_egs);
  private:
   XvectorPerturbOptions opts_;
+
+  void ApplyAdditiveNoise(const MatrixBase<BaseFloat> &input_eg,
+                          const Matrix<BaseFloat> &noise_eg,
+                          const int32 &SNR,
+                          Matrix<BaseFloat> *perturb_eg);
 };
+
 
 // randomly disturb the input signal using a band-pass filter with no zeros.
 void ComputeAndApplyRandDistortion(const MatrixBase<BaseFloat> &input_egs,
