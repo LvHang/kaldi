@@ -84,18 +84,6 @@ void ApplyPerturbation(XvectorPerturbOptions opts,
   ////}
 }
 
-// add
-// This function is a entrance. It calls ApplyDistortion to apply different
-// type of distortions on input.
-void PerturbExample(XvectorPerturbOptions opts,
-                    const Matrix<BaseFloat> &input_egs,
-                    Matrix<BaseFloat> *perturb_egs) {
-  //new a PerturbXvectorSignal object and call ApplyDistortion
-  PerturbXvectorSignal perturb_xvector(opts);
-  perturb_xvector.ApplyDistortion(input_egs, perturb_egs);
-}
-// add-end
-
 } // end of namespace nnet3
 } // end of namespace kaldi
 
@@ -145,6 +133,19 @@ int main(int argc, char *argv[]) {
        
     }
 
+    // if we have the add_noise option, we need to record the keys of noise_egs.
+    // It will easy for us to choose a different noise example for each input_eg.
+    std::vector<std::string> list_noise_egs;
+    if (!perturb_opts.add_noise_rspecifier.empty()) {
+      list_noise_egs.clear();
+      SequentialNnetExampleReader noise_seq_reader(perturb_opts.add_noise_rspecifier);
+      for (; !noise_seq_reader.Done(); noise_seq_reader.Next()) {
+        std::string key = noise_seq_reader.Key();
+        list_noise_egs.push_back(key);
+      }
+      noise_seq_reader.Close();
+    }
+ 
     for (; !example_reader.Done(); example_reader.Next(), num_read++) {
       std::string key = example_reader.Key();
       const NnetExample &input_eg = example_reader.Value();
@@ -153,9 +154,22 @@ int main(int argc, char *argv[]) {
       Matrix<BaseFloat> perturb_eg_mat, 
         input_eg_mat;
       input_eg_io.features.CopyToMat(&input_eg_mat);      
+      
       // add
       if (!perturb_opts.add_noise_rspecifier.empty()) {
-        PerturbExample(perturb_opts, input_eg_mat, &perturb_eg_mat);
+        // For the input example, we firstly random choose an noise example.
+        int32 num_noise_egs = list_noise_egs.size();
+        int32 index_noise_eg = RandInt(0, num_noise_egs - 1);
+        std::string key_noise_eg = list_noise_egs[index_noise_eg];
+
+        RandomAccessNnetExampleReader noise_random_reader(perturb_opts.add_noise_rspecifier);
+        const NnetExample &noise_eg = noise_random_reader.Value(key_noise_eg);
+        const NnetIo &noise_eg_io = noise_eg.io[0];
+        Matrix<BaseFloat> noise_eg_mat;
+        noise_eg_io.features.CopyToMat(&noise_eg_mat);
+
+        // We call the PerturbExample to implement adding distortion.
+        PerturbExample(perturb_opts, input_eg_mat, noise_eg_mat, &perturb_eg_mat);
       } else {
         ApplyPerturbation(perturb_opts, input_eg_mat, noise_mat, &perturb_eg_mat);
       }

@@ -77,8 +77,7 @@ void TimeStretch(const MatrixBase<BaseFloat> &input_egs,
 // and add it. So that the perturbed signal is created. 
 void PerturbXvectorSignal::ApplyAdditiveNoise(const MatrixBase<BaseFloat> &input_eg,
                                               const Matrix<BaseFloat> &noise_eg,
-                                              const int32 &SNR,
-                                              Matrix<BaseFloat> *perturb_eg) {
+                                              Matrix<BaseFloat> *perturbed_eg) {
   // In the version, we ask the noise_cols == input_cols.
   int32 input_rows = input_eg.NumRows(), input_cols = input_eg.NumCols();  
   KALDI_ASSERT(noise_eg.NumCols() == input_cols);
@@ -117,48 +116,37 @@ void PerturbXvectorSignal::ApplyAdditiveNoise(const MatrixBase<BaseFloat> &input
 
   // In Energy domain, SNR=20log10(S/N). 
   // 10^(SNR/20) = input_energy / (scale^2 * noise_energy)
-  double scale = input_energy / noise_energy / (pow(10,SNR/20));
+  double scale = input_energy / noise_energy / (pow(10,opts_.snr/20));
   scale = sqrt(scale);
   
   // Add noise mat to input_eg mat
-  perturb_eg->Resize(input_rows, input_cols);
-  perturb_eg->CopyFromMat(input_eg);
-  perturb_eg->AddMat(scale, selected_noise_mat);
+  perturbed_eg->Resize(input_rows, input_cols);
+  perturbed_eg->CopyFromMat(input_eg);
+  perturbed_eg->AddMat(scale, selected_noise_mat);
 }
 
 void PerturbXvectorSignal::ApplyDistortion(const MatrixBase<BaseFloat> &input_egs,
                                            Matrix<BaseFloat> *perturb_egs) {
-  if (!opts_.add_noise_rspecifier.empty()) { // deal with the add_noise ark situdation
-    // count the number of noise examples and record the key
-    std::vector<std::string> list_noise_egs;
-    list_noise_egs.clear();
-    kaldi::nnet3::SequentialNnetExampleReader noise_seq_reader(opts_.add_noise_rspecifier);
-    for (; !noise_seq_reader.Done(); noise_seq_reader.Next()) {
-      std::string key = noise_seq_reader.Key();
-      list_noise_egs.push_back(key);
-    }
-    noise_seq_reader.Close();
-    
-    // random choose a noise_eg and use it.
-    int32 num_noise_egs = list_noise_egs.size();
-    int32 index_noise_egs = RandInt(0, num_noise_egs - 1);
-    std::string key_noise_egs = list_noise_egs[index_noise_egs];
-
-    kaldi::nnet3::RandomAccessNnetExampleReader noise_random_reader(opts_.add_noise_rspecifier);
-    const kaldi::nnet3::NnetExample &noise_eg = noise_random_reader.Value(key_noise_egs);
-    const kaldi::nnet3::NnetIo &noise_eg_io = noise_eg.io[0];
-    Matrix<BaseFloat> noise_eg_mat;
-    noise_eg_io.features.CopyToMat(&noise_eg_mat);
-    int32 SNR = opts_.snr;
-
     // conduct ApplyAdditiveNoise
-    ApplyAdditiveNoise(input_egs, noise_eg_mat, SNR, perturb_egs);
-
+  if (!opts_.add_noise_rspecifier.empty()) {
+    ApplyAdditiveNoise(input_egs, *noise_egs_, perturb_egs);
     // conduct others
     // TODO
   } else { // deal with the opts_.noise_egs situation
     // TODO
   }
 }
-// add-end
+
+// This function is a entrance. It calls ApplyDistortion to apply different
+// type of distortions on input.
+void PerturbExample(XvectorPerturbOptions opts,
+                    const Matrix<BaseFloat> &input_egs,
+                    const Matrix<BaseFloat> &noise_egs,
+                    Matrix<BaseFloat> *perturbed_egs) {
+  //new a PerturbXvectorSignal object and call ApplyDistortion
+  PerturbXvectorSignal perturb_egs(opts);
+  perturb_egs.SetNoiseEgs(noise_egs);
+  perturb_egs.ApplyDistortion(input_egs, perturbed_egs);
+}
+
 } // end of namespace kaldi

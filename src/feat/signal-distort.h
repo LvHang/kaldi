@@ -32,7 +32,6 @@
 #include "feat/resample.h"
 #include "matrix/matrix-functions.h"
 #include "cudamatrix/cu-matrix.h"
-#include "nnet3/nnet-example.h"
 
 namespace kaldi {
 
@@ -45,7 +44,7 @@ struct XvectorPerturbOptions {
   bool rand_distort;
   std::string noise_egs;
   std::string add_noise_rspecifier;
-  int32 snr;
+  BaseFloat snr;
 
   XvectorPerturbOptions(): max_shift(0.2),
                            max_time_stretch(0.2),
@@ -74,16 +73,22 @@ struct XvectorPerturbOptions {
 class PerturbXvectorSignal {
  public:
   PerturbXvectorSignal(XvectorPerturbOptions opts): opts_(opts) { };
-
+  inline void SetNoiseEgs(const Matrix<BaseFloat> &noise_egs) {
+    noise_egs_ = &noise_egs;
+  }
   void ApplyDistortion(const MatrixBase<BaseFloat> &input_egs,
                        Matrix<BaseFloat> *perturb_egs);
  private:
   XvectorPerturbOptions opts_;
-
+  // if we want use many examples in once ApplyDistortion, we can expand the point
+  // to a point vector.
+  const Matrix<BaseFloat> *noise_egs_;
+  // I know we can use noise_egs_ instead of noise_eg parameter in this function,
+  // But I keep it. Because we may expand the point to a point vector and choose
+  // one kind noise to call ApplyAdditiveNoise.
   void ApplyAdditiveNoise(const MatrixBase<BaseFloat> &input_eg,
                           const Matrix<BaseFloat> &noise_eg,
-                          const int32 &SNR,
-                          Matrix<BaseFloat> *perturb_eg);
+                          Matrix<BaseFloat> *perturbed_eg);
 };
 
 
@@ -103,6 +108,11 @@ void ComputeAndApplyRandDistortion(const MatrixBase<BaseFloat> &input_egs,
 void TimeStretch(const MatrixBase<BaseFloat> &input_egs,
                  BaseFloat max_time_stretch,
                  Matrix<BaseFloat> *perturb_egs);
+
+void PerturbExample(XvectorPerturbOptions opts,
+                    const Matrix<BaseFloat> &input_egs,
+                    const Matrix<BaseFloat> &noise_egs,
+                    Matrix<BaseFloat> *perturbed_egs);
 
 } // end of namespace kaldi
 #endif // KALDI_SIGNAL_DISTORT_H_
