@@ -43,7 +43,7 @@ struct XvectorPerturbOptions {
   int32 negation_prop; 
   bool rand_distort;
   std::string noise_egs;
-  std::string add_noise_rspecifier;
+  std::string add_noise;
   BaseFloat snr;
 
   XvectorPerturbOptions(): max_shift(0.2),
@@ -63,7 +63,7 @@ struct XvectorPerturbOptions {
     opts->Register("noise-egs", &noise_egs, "If supplied, the additive noise is added to input signal.");
     opts->Register("rand_distort", &rand_distort, "If true, the signal is slightly changes"
                    "using some designed FIR filter with no zeros.");
-    opts->Register("add-noise", &add_noise_rspecifier, "specify a file contains some noise egs");
+    opts->Register("add-noise", &add_noise, "specify a file contains some noise egs");
     opts->Register("SNR",&snr,"specify a Signal to Noise Ration. We will scale the noise according"
                 "to the original signal and SNR. Normally, it's a non-zero number between -30 and 30"
                 "default=10");
@@ -111,7 +111,6 @@ void TimeStretch(const MatrixBase<BaseFloat> &input_egs,
 
 void PerturbExample(XvectorPerturbOptions opts,
                     const Matrix<BaseFloat> &input_egs,
-                    const Matrix<BaseFloat> &noise_egs,
                     Matrix<BaseFloat> *perturbed_egs);
 
 } // end of namespace kaldi

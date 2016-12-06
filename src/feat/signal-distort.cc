@@ -128,7 +128,25 @@ void PerturbXvectorSignal::ApplyAdditiveNoise(const MatrixBase<BaseFloat> &input
 void PerturbXvectorSignal::ApplyDistortion(const MatrixBase<BaseFloat> &input_egs,
                                            Matrix<BaseFloat> *perturb_egs) {
     // conduct ApplyAdditiveNoise
-  if (!opts_.add_noise_rspecifier.empty()) {
+  if (!opts_.add_noise.empty()) {
+    // choose a noise from the noise.scp/ark
+    // 1) we need to record the keys of noise_egs
+    std::vector<std::string> list_noise_egs;
+    SequentialBaseFloatMatrixReader noise_seq_reader(opts_.add_noise);
+    for (; !noise_seq_reader.Done(); noise_seq_reader.Next()) {
+      std::string key = noise_seq_reader.Key();
+      list_noise_egs.push_back(key);
+    }
+    noise_seq_reader.Close();
+
+    // 2) we random choose an noise example
+    int32 num_noise_egs = list_noise_egs.size();
+    int32 index_noise_eg = RandInt(0, num_noise_egs - 1);
+    std::string key_noise_eg = list_noise_egs[index_noise_eg];
+    RandomAccessBaseFloatMatrixReader noise_random_reader(opts_.add_noise);
+    Matrix<BaseFloat> noise_eg_mat = noise_random_reader.Value(key_noise_eg);
+    SetNoiseEgs(noise_eg_mat);
+
     ApplyAdditiveNoise(input_egs, *noise_egs_, perturb_egs);
     // conduct others
     // TODO
@@ -141,11 +159,9 @@ void PerturbXvectorSignal::ApplyDistortion(const MatrixBase<BaseFloat> &input_eg
 // type of distortions on input.
 void PerturbExample(XvectorPerturbOptions opts,
                     const Matrix<BaseFloat> &input_egs,
-                    const Matrix<BaseFloat> &noise_egs,
                     Matrix<BaseFloat> *perturbed_egs) {
   //new a PerturbXvectorSignal object and call ApplyDistortion
   PerturbXvectorSignal perturb_egs(opts);
-  perturb_egs.SetNoiseEgs(noise_egs);
   perturb_egs.ApplyDistortion(input_egs, perturbed_egs);
 }
 

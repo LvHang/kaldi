@@ -102,6 +102,7 @@ int main(int argc, char *argv[]) {
         "e.g.\n"
         "nnet3-xvector-signal-perturb-egs --noise-egs=noise.egs\n"
         "--max-shift=0.2 --max-speed-perturb=0.1 --negation=true\n"
+        "--add-noise=noise.scp --snr=10\n"
         "ark:input.egs akr:distorted.egs\n";
     ParseOptions po(usage);
 
@@ -129,21 +130,7 @@ int main(int argc, char *argv[]) {
       SequentialNnetExampleReader noise_reader(perturb_opts.noise_egs);
       const NnetExample &noise_egs = noise_reader.Value();
       const NnetIo &noise_io = noise_egs.io[0];
-      noise_io.features.CopyToMat(noise_mat);
-       
-    }
-
-    // if we have the add_noise option, we need to record the keys of noise_egs.
-    // It will easy for us to choose a different noise example for each input_eg.
-    std::vector<std::string> list_noise_egs;
-    if (!perturb_opts.add_noise_rspecifier.empty()) {
-      list_noise_egs.clear();
-      SequentialNnetExampleReader noise_seq_reader(perturb_opts.add_noise_rspecifier);
-      for (; !noise_seq_reader.Done(); noise_seq_reader.Next()) {
-        std::string key = noise_seq_reader.Key();
-        list_noise_egs.push_back(key);
-      }
-      noise_seq_reader.Close();
+      noise_io.features.CopyToMat(noise_mat);       
     }
  
     for (; !example_reader.Done(); example_reader.Next(), num_read++) {
@@ -156,20 +143,9 @@ int main(int argc, char *argv[]) {
       input_eg_io.features.CopyToMat(&input_eg_mat);      
       
       // add
-      if (!perturb_opts.add_noise_rspecifier.empty()) {
-        // For the input example, we firstly random choose an noise example.
-        int32 num_noise_egs = list_noise_egs.size();
-        int32 index_noise_eg = RandInt(0, num_noise_egs - 1);
-        std::string key_noise_eg = list_noise_egs[index_noise_eg];
-
-        RandomAccessNnetExampleReader noise_random_reader(perturb_opts.add_noise_rspecifier);
-        const NnetExample &noise_eg = noise_random_reader.Value(key_noise_eg);
-        const NnetIo &noise_eg_io = noise_eg.io[0];
-        Matrix<BaseFloat> noise_eg_mat;
-        noise_eg_io.features.CopyToMat(&noise_eg_mat);
-
+      if (!perturb_opts.add_noise.empty()) {
         // We call the PerturbExample to implement adding distortion.
-        PerturbExample(perturb_opts, input_eg_mat, noise_eg_mat, &perturb_eg_mat);
+        PerturbExample(perturb_opts, input_eg_mat, &perturb_eg_mat);
       } else {
         ApplyPerturbation(perturb_opts, input_eg_mat, noise_mat, &perturb_eg_mat);
       }
