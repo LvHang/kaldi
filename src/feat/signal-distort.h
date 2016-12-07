@@ -51,7 +51,7 @@ struct XvectorPerturbOptions {
                            frame_dim(80),
                            negation_prop(0.0),
                            rand_distort(false),
-                           snr(10) { }
+                           snr(10.0) { }
   void Register(OptionsItf *opts) { 
     opts->Register("max-shift", &max_shift, "Maximum random shift relative"
                 "to frame length applied to egs.");
@@ -63,31 +63,23 @@ struct XvectorPerturbOptions {
     opts->Register("noise-egs", &noise_egs, "If supplied, the additive noise is added to input signal.");
     opts->Register("rand_distort", &rand_distort, "If true, the signal is slightly changes"
                    "using some designed FIR filter with no zeros.");
-    opts->Register("add-noise", &add_noise, "specify a file contains some noise egs");
-    opts->Register("SNR",&snr,"specify a Signal to Noise Ration. We will scale the noise according"
-                "to the original signal and SNR. Normally, it's a non-zero number between -30 and 30"
-                "default=10");
+    opts->Register("add-noise", &add_noise, "Noise rspecifier for additive noises, if "
+                   "nonempty, the additive noise randomly selected and added to input egs.");
+    opts->Register("SNR",&snr,"Specify a Signal to Noise Ration. We will scale the noise according "
+                   "to the original signal and SNR. Normally, it's a non-zero number between -30 and 30"
+                   "default=10");
   }
 };
 
 class PerturbXvectorSignal {
  public:
   PerturbXvectorSignal(XvectorPerturbOptions opts): opts_(opts) { };
-  inline void SetNoiseEgs(const Matrix<BaseFloat> &noise_egs) {
-    noise_egs_ = &noise_egs;
-  }
   void ApplyDistortion(const MatrixBase<BaseFloat> &input_egs,
                        Matrix<BaseFloat> *perturb_egs);
  private:
   XvectorPerturbOptions opts_;
-  // if we want use many examples in once ApplyDistortion, we can expand the point
-  // to a point vector.
-  const Matrix<BaseFloat> *noise_egs_;
-  // I know we can use noise_egs_ instead of noise_eg parameter in this function,
-  // But I keep it. Because we may expand the point to a point vector and choose
-  // one kind noise to call ApplyAdditiveNoise.
   void ApplyAdditiveNoise(const MatrixBase<BaseFloat> &input_eg,
-                          const Matrix<BaseFloat> &noise_eg,
+                          const Matrix<BaseFloat> &noise_mat,
                           Matrix<BaseFloat> *perturbed_eg);
 };
 

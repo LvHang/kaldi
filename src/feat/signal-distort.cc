@@ -76,33 +76,30 @@ void TimeStretch(const MatrixBase<BaseFloat> &input_egs,
 // the signal level of the orginial signal. According to SNR, we rescale the noise
 // and add it. So that the perturbed signal is created. 
 void PerturbXvectorSignal::ApplyAdditiveNoise(const MatrixBase<BaseFloat> &input_eg,
-                                              const Matrix<BaseFloat> &noise_eg,
+                                              const Matrix<BaseFloat> &noise_mat,
                                               Matrix<BaseFloat> *perturbed_eg) {
   // In the version, we ask the noise_cols == input_cols.
   int32 input_rows = input_eg.NumRows(), input_cols = input_eg.NumCols();  
-  KALDI_ASSERT(noise_eg.NumCols() == input_cols);
+  KALDI_ASSERT(noise_mat.NumCols() == input_cols);
 
-  // According to the rows of noise_eg, form the noise_mat
-  // repeat the noise_eg blocks to have a new block which is longer than input_eg
- 
-  // As the noise_eg is very huge and the input_eg is small normally,
-  // so we'd better not reload the "noise_eg" matrix
+  // As the noise_mat is very huge and the input_eg is small normally,
+  // so we'd better not reload the "noise_mat" matrix
   // select the noise range
 
   Matrix<BaseFloat> selected_noise_mat;
   selected_noise_mat.Resize(input_rows, input_cols);
   
-  int32 noise_rows = noise_eg.NumRows();
+  int32 noise_rows = noise_mat.NumRows();
   int32 start_row_ind = RandInt(0, noise_rows - input_rows);
   
-  if (noise_eg.NumRows() < input_rows) {
+  if (noise_mat.NumRows() < input_rows) {
     int32 indices[input_rows];
     for (int32 i=0; i < input_rows; ++i) {
-      indices[i] = (start_row_ind + i) % noise_eg.NumRows();
+      indices[i] = (start_row_ind + i) % noise_mat.NumRows();
     }
-    selected_noise_mat.CopyRows(noise_eg, indices);
+    selected_noise_mat.CopyRows(noise_mat, indices);
   } else {
-    selected_noise_mat.AddMat(1.0, noise_eg.Range(start_row_ind, input_rows,
+    selected_noise_mat.AddMat(1.0, noise_mat.Range(start_row_ind, input_rows,
                                                   0, input_cols));
   }
 
@@ -127,40 +124,36 @@ void PerturbXvectorSignal::ApplyAdditiveNoise(const MatrixBase<BaseFloat> &input
 
 void PerturbXvectorSignal::ApplyDistortion(const MatrixBase<BaseFloat> &input_egs,
                                            Matrix<BaseFloat> *perturb_egs) {
-    // conduct ApplyAdditiveNoise
   if (!opts_.add_noise.empty()) {
     // choose a noise from the noise.scp/ark
     // 1) we need to record the keys of noise_egs
-    std::vector<std::string> list_noise_egs;
+    std::vector<std::string> noise_list;
     SequentialBaseFloatMatrixReader noise_seq_reader(opts_.add_noise);
     for (; !noise_seq_reader.Done(); noise_seq_reader.Next()) {
       std::string key = noise_seq_reader.Key();
-      list_noise_egs.push_back(key);
+      noise_list.push_back(key);
     }
     noise_seq_reader.Close();
 
     // 2) we random choose an noise example
-    int32 num_noise_egs = list_noise_egs.size();
-    int32 index_noise_eg = RandInt(0, num_noise_egs - 1);
-    std::string key_noise_eg = list_noise_egs[index_noise_eg];
+    int32 num_noises = noise_list.size();
+    int32 noise_index = RandInt(0, num_noises - 1);
+    std::string noise_name = noise_list[noise_index];
     RandomAccessBaseFloatMatrixReader noise_random_reader(opts_.add_noise);
-    Matrix<BaseFloat> noise_eg_mat = noise_random_reader.Value(key_noise_eg);
-    SetNoiseEgs(noise_eg_mat);
+    Matrix<BaseFloat> noise_mat = noise_random_reader.Value(noise_name);
 
-    ApplyAdditiveNoise(input_egs, *noise_egs_, perturb_egs);
+    // 3) conduct ApplyAdditiveNoise
+    ApplyAdditiveNoise(input_egs, noise_mat, perturb_egs);
     // conduct others
     // TODO
-  } else { // deal with the opts_.noise_egs situation
-    // TODO
-  }
+  } 
 }
 
-// This function is a entrance. It calls ApplyDistortion to apply different
-// type of distortions on input.
+// This function calls ApplyDistortion to apply different type of perturbations.
 void PerturbExample(XvectorPerturbOptions opts,
                     const Matrix<BaseFloat> &input_egs,
                     Matrix<BaseFloat> *perturbed_egs) {
-  //new a PerturbXvectorSignal object and call ApplyDistortion
+  // new a PerturbXvectorSignal object and call ApplyDistortion
   PerturbXvectorSignal perturb_egs(opts);
   perturb_egs.ApplyDistortion(input_egs, perturbed_egs);
 }
