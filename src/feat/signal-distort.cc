@@ -72,6 +72,17 @@ void TimeStretch(const MatrixBase<BaseFloat> &input_egs,
   perturb_egs->CopyFromMat(out_mat);
 }
 
+PerturbXvectorSignal::PerturbXvectorSignal(XvectorPerturbOptions opts): opts_(opts) {
+  if (!opts_.add_noise.empty()) {
+    // initialize the noise_list_
+    SequentialBaseFloatMatrixReader noise_seq_reader(opts_.add_noise);
+    for (; !noise_seq_reader.Done(); noise_seq_reader.Next()) {
+      std::string key = noise_seq_reader.Key();
+      noise_list_.push_back(key);
+    }
+    noise_seq_reader.Close();
+  }
+}
 // This function add the noise to the orginial signal. We should not normalize 
 // the signal level of the orginial signal. According to SNR, we rescale the noise
 // and add it. So that the perturbed signal is created. 
@@ -122,40 +133,26 @@ void PerturbXvectorSignal::ApplyAdditiveNoise(const MatrixBase<BaseFloat> &input
   perturbed_eg->AddMat(scale, selected_noise_mat);
 }
 
-void PerturbXvectorSignal::ApplyDistortion(const MatrixBase<BaseFloat> &input_egs,
-                                           Matrix<BaseFloat> *perturb_egs) {
-  if (!opts_.add_noise.empty()) {
-    // choose a noise from the noise.scp/ark
-    // 1) we need to record the keys of noise_egs
-    std::vector<std::string> noise_list;
-    SequentialBaseFloatMatrixReader noise_seq_reader(opts_.add_noise);
-    for (; !noise_seq_reader.Done(); noise_seq_reader.Next()) {
-      std::string key = noise_seq_reader.Key();
-      noise_list.push_back(key);
-    }
-    noise_seq_reader.Close();
+void PerturbXvectorSignal::ApplyDistortion(const MatrixBase<BaseFloat> &input_eg,
+                                           Matrix<BaseFloat> *perturbed_eg) {
+  // we random choose an noise example
+  int32 num_noises = noise_list_.size();
+  int32 noise_index = RandInt(0, num_noises - 1);
+  std::string noise_name = noise_list_[noise_index];
+  RandomAccessBaseFloatMatrixReader noise_random_reader(opts_.add_noise);
+  Matrix<BaseFloat> noise_mat = noise_random_reader.Value(noise_name);
 
-    // 2) we random choose an noise example
-    int32 num_noises = noise_list.size();
-    int32 noise_index = RandInt(0, num_noises - 1);
-    std::string noise_name = noise_list[noise_index];
-    RandomAccessBaseFloatMatrixReader noise_random_reader(opts_.add_noise);
-    Matrix<BaseFloat> noise_mat = noise_random_reader.Value(noise_name);
-
-    // 3) conduct ApplyAdditiveNoise
-    ApplyAdditiveNoise(input_egs, noise_mat, perturb_egs);
-    // conduct others
-    // TODO
-  } 
+  // conduct ApplyAdditiveNoise
+  ApplyAdditiveNoise(input_eg, noise_mat, perturbed_eg);
+  // conduct others
+  // TODO
 }
 
 // This function calls ApplyDistortion to apply different type of perturbations.
-void PerturbExample(XvectorPerturbOptions opts,
-                    const Matrix<BaseFloat> &input_egs,
-                    Matrix<BaseFloat> *perturbed_egs) {
-  // new a PerturbXvectorSignal object and call ApplyDistortion
-  PerturbXvectorSignal perturb_egs(opts);
-  perturb_egs.ApplyDistortion(input_egs, perturbed_egs);
+void PerturbExample(PerturbXvectorSignal &eg_perturber,
+                    const Matrix<BaseFloat> &input_eg,
+                    Matrix<BaseFloat> *perturbed_eg) {
+  eg_perturber.ApplyDistortion(input_eg, perturbed_eg);
 }
 
 } // end of namespace kaldi

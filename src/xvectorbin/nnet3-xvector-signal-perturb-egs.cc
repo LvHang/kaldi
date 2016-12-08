@@ -59,6 +59,7 @@ int main(int argc, char *argv[]) {
 
     int64 num_read = 0, num_written = 0;
 
+    PerturbXvectorSignal eg_perturber(perturb_opts);
     for (; !example_reader.Done(); example_reader.Next(), num_read++) {
       std::string key = example_reader.Key();
       const NnetExample &input_eg = example_reader.Value();
@@ -68,7 +69,7 @@ int main(int argc, char *argv[]) {
         input_eg_mat;
       input_eg_io.features.CopyToMat(&input_eg_mat);      
       
-      PerturbExample(perturb_opts, input_eg_mat, &perturb_eg_mat);
+      PerturbExample(eg_perturber, input_eg_mat, &perturb_eg_mat);
  
       perturb_eg->io.resize(1.0);
       perturb_eg->io[0].features.SwapFullMatrix(&perturb_eg_mat);

@@ -71,14 +71,15 @@ struct XvectorPerturbOptions {
 
 class PerturbXvectorSignal {
  public:
-  PerturbXvectorSignal(XvectorPerturbOptions opts): opts_(opts) { };
-  void ApplyDistortion(const MatrixBase<BaseFloat> &input_egs,
-                       Matrix<BaseFloat> *perturb_egs);
- private:
-  XvectorPerturbOptions opts_;
+  PerturbXvectorSignal(XvectorPerturbOptions opts);
+  void ApplyDistortion(const MatrixBase<BaseFloat> &input_eg,
+                       Matrix<BaseFloat> *perturbed_eg);
   void ApplyAdditiveNoise(const MatrixBase<BaseFloat> &input_eg,
                           const Matrix<BaseFloat> &noise_mat,
                           Matrix<BaseFloat> *perturbed_eg);
+ private:
+  XvectorPerturbOptions opts_;
+  std::vector<std::string> noise_list_;
 };
 
 
@@ -99,9 +100,9 @@ void TimeStretch(const MatrixBase<BaseFloat> &input_egs,
                  BaseFloat max_time_stretch,
                  Matrix<BaseFloat> *perturb_egs);
 
-void PerturbExample(XvectorPerturbOptions opts,
-                    const Matrix<BaseFloat> &input_egs,
-                    Matrix<BaseFloat> *perturbed_egs);
+void PerturbExample(PerturbXvectorSignal &eg_perturber,
+                    const Matrix<BaseFloat> &input_eg,
+                    Matrix<BaseFloat> *perturbed_eg);
 
 } // end of namespace kaldi
 #endif // KALDI_SIGNAL_DISTORT_H_
