@@ -42,7 +42,6 @@ struct XvectorPerturbOptions {
   int32 frame_dim;
   int32 negation_prop; 
   bool rand_distort;
-  std::string noise_egs;
   std::string add_noise;
   BaseFloat snr;
 
@@ -53,14 +52,13 @@ struct XvectorPerturbOptions {
                            rand_distort(false),
                            snr(10.0) { }
   void Register(OptionsItf *opts) { 
-    opts->Register("max-shift", &max_shift, "Maximum random shift relative"
-                "to frame length applied to egs.");
+    opts->Register("max-shift", &max_shift, "Maximum random shift relative "
+                   "to frame length applied to egs.");
     opts->Register("max-speed-perturb", &max_time_stretch,
                    "Max speed perturbation applied on egs.");
     opts->Register("frame-dim", &frame_dim,
                    "The numebr of samples in input frame as product of frame_length by samp_freq.");
     opts->Register("negation-prop", &negation_prop, "This proportion of the input value is randomly negated.");
-    opts->Register("noise-egs", &noise_egs, "If supplied, the additive noise is added to input signal.");
     opts->Register("rand_distort", &rand_distort, "If true, the signal is slightly changes"
                    "using some designed FIR filter with no zeros.");
     opts->Register("add-noise", &add_noise, "Noise rspecifier for additive noises, if "
