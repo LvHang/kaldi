@@ -36,6 +36,78 @@ struct NoiseController{
     noise_t_start_(noise_t_start), noise_t_end_(noise_t_end), snr_(snr) { }
 };
 
+void GenerateController(std::vector<std::string> &segments, 
+                        std::vector<NoiseController> *controller) {
+  BaseFloat wav_t_start;
+  BaseFloat wav_t_end;
+  std::string noise_uttid;
+  BaseFloat noise_t_start;
+  BaseFloat noise_t_end;
+  BaseFloat snr;
+  for(int i=0; i < segments.size(); ++i) {
+    std::vector<std::string> split_string;
+    SplitStringToVector(segments[i], ":", true, &split_string);
+    KALDI_ASSERT(split_string.size() == 6);
+    ConvertStringToReal(split_string[0], &wav_t_start);
+    ConvertStringToReal(split_string[1], &wav_t_end);
+    noise_uttid = split_string[2];
+    ConvertStringToReal(split_string[3], &noise_t_start);
+    ConvertStringToReal(split_string[4], &noise_t_end);
+    ConvertStringToReal(split_string[5], &snr);
+  
+    controller->push_back(NoiseController(wav_t_start, wav_t_end, noise_uttid,
+                                            noise_t_start, noise_t_end, snr));
+  }
+}
+
+void ApplyNoise(std::string &noise_scp, const std::vector<NoiseController> &controller,
+                const VectorBase<BaseFloat> &input_wav, VectorBase<BaseFloat> *perturbed_wav) {
+  // about noise list
+  RandomAccessTableReader<WaveHolder> noise_reader(noise_scp);
+  int samp_freq_input = input_wav.Dim();
+
+  // add noise
+
+  for (int i=0; i < controller.size(); ++i) {
+    const WaveData &noise_wav = noise_reader.Value(controller[i].noise_uttid_);
+    BaseFloat samp_freq_noise = noise_wav.SampFreq();
+    KALDI_ASSERT(samp_freq_input == samp_freq_noise);
+      
+    const Matrix<BaseFloat> &noise_matrix = noise_wav.Data();
+    int32 num_samp_noise = noise_matrix.NumCols();
+    Vector<BaseFloat> noise(num_samp_noise);
+    noise.CopyRowFromMat(noise_matrix, 0);
+
+    int32 input_start_point = samp_freq_input * controller[i].wav_t_start_;
+    int32 input_end_point = samp_freq_input * controller[i].wav_t_end_ - 1;
+    int32 noise_start_point = samp_freq_noise * controller[i].noise_t_start_;
+    int32 noise_end_point = samp_freq_noise * controller[i].noise_t_end_ - 1;
+    BaseFloat snr = controller[i].snr_;
+
+    SubVector<BaseFloat> input_part(input_wav, input_start_point,
+                                    input_end_point - input_start_point + 1);
+    SubVector<BaseFloat> noise_part(noise, noise_start_point,
+                                    noise_end_point - noise_start_point + 1);
+    Vector<BaseFloat> selected_noise(input_part.Dim());
+    if (noise_part.Dim() < input_part.Dim()) {
+      int32 the_rest = selected_noise.Dim();
+      while (the_rest > noise_part.Dim()) {
+        selected_noise.Range(selected_noise.Dim()-the_rest,
+                             noise_part.Dim()).CopyFromVec(noise_part);
+        the_rest = the_rest - noise_part.Dim();
+      }
+      selected_noise.Range(selected_noise.Dim()-the_rest, the_rest).CopyFromVec(
+          noise_part.Range(0, the_rest));
+    } else {
+      selected_noise.CopyFromVec(noise_part);
+    }
+      
+    BaseFloat input_energy = VecVec(input_part, input_part);
+    BaseFloat noise_energy = VecVec(selected_noise, selected_noise);
+    BaseFloat scale_factor = sqrt(input_energy/ noise_energy/ (pow(10, snr/20)) );
+    perturbed_wav->Range(input_start_point, input_part.Dim()).AddVec(scale_factor, selected_noise);
+  }
+}
 
 }
 
@@ -44,27 +116,27 @@ int main(int argc, char *argv[]) {
     using namespace kaldi;
 
     const char *usage =
-        "Perturb the wave files supplied via the specified noise-range file\n"
+        "Perturb the wave files supplied via the specified noise-range\n"
         "Usage:  nnet3-fvector-perturb-signal [options...] <wav-in-rxfilename> "
         "<wav-out-wxfilename>\n"
         "e.g.\n"
-        "nnet3-fvector-perturb-signal --noise-range-file=uttid.range.n --add-noise-list="
-        "scp:noise.scp --input-channel=0 input.wav output.wav\n";
+        "nnet3-fvector-perturb-signal --noise=scp:noise.scp --noise-range="
+        "\"head -n 5 a.noiserange | tail -n 1\" --input-channel=0 input.wav "
+        "perturbed_input.wav\n";
 
     ParseOptions po(usage);
     
-    std::string noise_range_file;
-    std::string noise_list_rspecifier;
+    std::string noise;
+    std::string noise_range;
     int32 input_channel = 0;
 
-    po.Register("noise-range-file",&noise_range_file,
+    po.Register("noise",&noise,
+                "There is a list of optional noise. It need to match the --noise-range.");
+    po.Register("noise-range",&noise_range,
                 "Provide a range file. We use the content in this file to control "
-                "the process of adding noise. The format of each line in this file "
-                ":<wav_t_start> <wav_t_end> <noise_utt_id> <noise_t_start> "
-                "<noise_t_end> <snr>");
-    po.Register("add-noise-list",&noise_list_rspecifier,
-                "There is a list of optional noise. It need to match the "
-                "--noise-range-file.");
+                "the process of adding noise. For each line, the format is <utt_id-perturb-i> "
+                "<wav_t_start_1>:<wav_t_end_1>:<noise_utt_id_1>:<noise_t_start_1>:<noise_t_end_1>:<snr_1>,...,"
+                "<wav_t_start_N>:<wav_t_end_N>:<noise_utt_id_N>:<noise_t_start_N>:<noise_t_end_N>:<snr_N>");
     po.Register("input-channel",&input_channel,
                 "Specifies the channel to be used in input file");
     
@@ -77,23 +149,15 @@ int main(int argc, char *argv[]) {
     std::string input_wave_file = po.GetArg(1);
     std::string output_wave_file = po.GetArg(2);
 
-    // Genterate the Noise Controller list
+    // Generate the Noise Controller list
     std::vector<NoiseController> controller;
-    if (noise_range_file != "") {
-      std::ifstream fi(noise_range_file.c_str());
-      if (!fi) {
-        KALDI_ERR << "failed to open file " << noise_range_file;
-      }
-      BaseFloat wav_t_start;
-      BaseFloat wav_t_end;
-      std::string noise_uttid;
-      BaseFloat noise_t_start;
-      BaseFloat noise_t_end;
-      BaseFloat snr;
-      while (fi >> wav_t_start >> wav_t_end >> noise_uttid >> noise_t_start >> noise_t_end >> snr) {
-        controller.push_back(NoiseController(wav_t_start, wav_t_end, noise_uttid,
-                                            noise_t_start, noise_t_end, snr));
-      }
+    if (noise_range != "") {
+      int index = noise_range.find_first_of(" ");
+      std::string perturbed_utt_id = noise_range.substr(0, index);
+      std::string noise_range_content = noise_range.substr(index+1);
+      std::vector<std::string> segments;
+      SplitStringToVector(noise_range_content, ",", true, &segments);
+      GenerateController(segments, &controller);
     }
 
     WaveData input_wave;
@@ -116,52 +180,9 @@ int main(int argc, char *argv[]) {
     Vector<BaseFloat> input(num_samp_input);
     input.CopyRowFromMat(input_matrix, input_channel);
 
-    // new output vector
+    // new output vector and add noise
     Vector<BaseFloat> output(input);
-
-    // about noise list
-    RandomAccessTableReader<WaveHolder> noise_reader(noise_list_rspecifier);
-
-    // add noise
-    for (int i=0; i < controller.size(); ++i) {
-      const WaveData &noise_wav = noise_reader.Value(controller[i].noise_uttid_);
-      BaseFloat samp_freq_noise = noise_wav.SampFreq();
-      KALDI_ASSERT(samp_freq_input == samp_freq_noise);
-      
-      const Matrix<BaseFloat> &noise_matrix = noise_wav.Data();
-      int32 num_samp_noise = noise_matrix.NumCols();
-      Vector<BaseFloat> noise(num_samp_noise);
-      noise.CopyRowFromMat(noise_matrix, 0);
-
-      int32 input_start_point = samp_freq_input * controller[i].wav_t_start_;
-      int32 input_end_point = samp_freq_input * controller[i].wav_t_end_ - 1;
-      int32 noise_start_point = samp_freq_noise * controller[i].noise_t_start_;
-      int32 noise_end_point = samp_freq_noise * controller[i].noise_t_end_ - 1;
-      BaseFloat snr = controller[i].snr_;
-
-      SubVector<BaseFloat> input_part(input, input_start_point,
-                                      input_end_point - input_start_point + 1);
-      SubVector<BaseFloat> noise_part(noise, noise_start_point,
-                                      noise_end_point - noise_start_point + 1);
-      Vector<BaseFloat> selected_noise(input_part.Dim());
-      if (noise_part.Dim() < input_part.Dim()) {
-        int32 the_rest = selected_noise.Dim();
-        while (the_rest > noise_part.Dim()) {
-          selected_noise.Range(selected_noise.Dim()-the_rest,
-                                    noise_part.Dim()).CopyFromVec(noise_part);
-          the_rest = the_rest - noise_part.Dim();
-        }
-        selected_noise.Range(selected_noise.Dim()-the_rest, the_rest).CopyFromVec(
-            noise_part.Range(0, the_rest));
-      } else {
-        selected_noise.CopyFromVec(noise_part);
-      }
-      
-      BaseFloat input_energy = VecVec(input_part, input_part);
-      BaseFloat noise_energy = VecVec(selected_noise, selected_noise);
-      BaseFloat scale_factor = sqrt(input_energy/ noise_energy/ (pow(10, snr/20)) );
-      output.Range(input_start_point, input_part.Dim()).AddVec(scale_factor, selected_noise);
-    }
+    ApplyNoise(noise, controller, input, &output);
 
     Matrix<BaseFloat> out_matrix(1, num_samp_input);
     out_matrix.CopyRowsFromVec(output);
