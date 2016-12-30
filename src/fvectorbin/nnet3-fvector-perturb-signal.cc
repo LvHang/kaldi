@@ -22,22 +22,22 @@
 
 namespace kaldi {
 
-struct NoiseController{
-  BaseFloat wav_t_start_;
-  BaseFloat wav_t_end_;
-  std::string noise_uttid_;
-  BaseFloat noise_t_start_;
-  BaseFloat noise_t_end_;
-  BaseFloat snr_;
+struct AdditiveNoiseRange{
+  BaseFloat wav_t_start;
+  BaseFloat wav_t_end;
+  std::string noise_uttid;
+  BaseFloat noise_t_start;
+  BaseFloat noise_t_end;
+  BaseFloat snr;
 
-  NoiseController(BaseFloat wav_t_start, BaseFloat wav_t_end, std::string noise_uttid,
-                  BaseFloat noise_t_start, BaseFloat noise_t_end, BaseFloat snr):
-    wav_t_start_(wav_t_start), wav_t_end_(wav_t_end), noise_uttid_(noise_uttid),
-    noise_t_start_(noise_t_start), noise_t_end_(noise_t_end), snr_(snr) { }
+  AdditiveNoiseRange(BaseFloat wav_t_start, BaseFloat wav_t_end, std::string noise_uttid,
+                     BaseFloat noise_t_start, BaseFloat noise_t_end, BaseFloat snr):
+    wav_t_start(wav_t_start), wav_t_end(wav_t_end), noise_uttid(noise_uttid),
+    noise_t_start(noise_t_start), noise_t_end(noise_t_end), snr(snr) { }
 };
 
 void GenerateController(std::vector<std::string> &segments, 
-                        std::vector<NoiseController> *controller) {
+                        std::vector<AdditiveNoiseRange> *controller) {
   BaseFloat wav_t_start;
   BaseFloat wav_t_end;
   std::string noise_uttid;
@@ -55,12 +55,12 @@ void GenerateController(std::vector<std::string> &segments,
     ConvertStringToReal(split_string[4], &noise_t_end);
     ConvertStringToReal(split_string[5], &snr);
   
-    controller->push_back(NoiseController(wav_t_start, wav_t_end, noise_uttid,
-                                            noise_t_start, noise_t_end, snr));
+    controller->push_back(AdditiveNoiseRange(wav_t_start, wav_t_end, noise_uttid,
+                                             noise_t_start, noise_t_end, snr));
   }
 }
 
-void ApplyNoise(std::string &noise_scp, const std::vector<NoiseController> &controller,
+void ApplyNoise(std::string &noise_scp, const std::vector<AdditiveNoiseRange> &controller,
                 const VectorBase<BaseFloat> &input_wav, VectorBase<BaseFloat> *perturbed_wav) {
   // about noise list
   RandomAccessTableReader<WaveHolder> noise_reader(noise_scp);
@@ -69,7 +69,7 @@ void ApplyNoise(std::string &noise_scp, const std::vector<NoiseController> &cont
   // add noise
 
   for (int i=0; i < controller.size(); ++i) {
-    const WaveData &noise_wav = noise_reader.Value(controller[i].noise_uttid_);
+    const WaveData &noise_wav = noise_reader.Value(controller[i].noise_uttid);
     BaseFloat samp_freq_noise = noise_wav.SampFreq();
     KALDI_ASSERT(samp_freq_input == samp_freq_noise);
       
@@ -78,26 +78,33 @@ void ApplyNoise(std::string &noise_scp, const std::vector<NoiseController> &cont
     Vector<BaseFloat> noise(num_samp_noise);
     noise.CopyRowFromMat(noise_matrix, 0);
 
-    int32 input_start_point = samp_freq_input * controller[i].wav_t_start_;
-    int32 input_end_point = samp_freq_input * controller[i].wav_t_end_ - 1;
-    int32 noise_start_point = samp_freq_noise * controller[i].noise_t_start_;
-    int32 noise_end_point = samp_freq_noise * controller[i].noise_t_end_ - 1;
-    BaseFloat snr = controller[i].snr_;
+    int32 input_start_point = samp_freq_input * controller[i].wav_t_start;
+    int32 input_end_point = samp_freq_input * controller[i].wav_t_end - 1;
+    int32 noise_start_point = samp_freq_noise * controller[i].noise_t_start;
+    int32 noise_end_point = samp_freq_noise * controller[i].noise_t_end - 1;
+    BaseFloat snr = controller[i].snr;
 
+    // The input vector and noise vector contain the whole content of utt seperately.
+    // According to the AdditiveNoiseRange, we stepwise add the additive noise to input.
+    // To save the space, we use Subvector, because it returns the pointer.
     SubVector<BaseFloat> input_part(input_wav, input_start_point,
                                     input_end_point - input_start_point + 1);
     SubVector<BaseFloat> noise_part(noise, noise_start_point,
                                     noise_end_point - noise_start_point + 1);
     Vector<BaseFloat> selected_noise(input_part.Dim());
+
+    // When encounter the situation where noise_part_length is shorter than input_part_length,
+    // We pad recursively until the selected_noise_length equal to input_part_length.
+    // Otherwise, selected_noise = noise_part
     if (noise_part.Dim() < input_part.Dim()) {
-      int32 the_rest = selected_noise.Dim();
-      while (the_rest > noise_part.Dim()) {
-        selected_noise.Range(selected_noise.Dim()-the_rest,
+      int32 the_rest_length = selected_noise.Dim();
+      while (the_rest_length > noise_part.Dim()) {
+        selected_noise.Range(selected_noise.Dim()-the_rest_length,
                              noise_part.Dim()).CopyFromVec(noise_part);
-        the_rest = the_rest - noise_part.Dim();
+        the_rest_length = the_rest_length - noise_part.Dim();
       }
-      selected_noise.Range(selected_noise.Dim()-the_rest, the_rest).CopyFromVec(
-          noise_part.Range(0, the_rest));
+      selected_noise.Range(selected_noise.Dim()-the_rest_length, the_rest_length).CopyFromVec(
+          noise_part.Range(0, the_rest_length));
     } else {
       selected_noise.CopyFromVec(noise_part);
     }
@@ -121,8 +128,8 @@ int main(int argc, char *argv[]) {
         "<wav-out-wxfilename>\n"
         "e.g.\n"
         "nnet3-fvector-perturb-signal --noise=scp:noise.scp --noise-range="
-        "\"head -n 5 a.noiserange | tail -n 1\" --input-channel=0 input.wav "
-        "perturbed_input.wav\n";
+        "wav1-perturbed-1 0.0:1.0:noise1:3.5:4.5:-8,... --input-channel=0 "
+        "input.wav perturbed_input.wav\n";
 
     ParseOptions po(usage);
     
@@ -150,8 +157,8 @@ int main(int argc, char *argv[]) {
     std::string output_wave_file = po.GetArg(2);
 
     // Generate the Noise Controller list
-    std::vector<NoiseController> controller;
-    if (noise_range != "") {
+    std::vector<AdditiveNoiseRange> controller;
+    if (!noise_range.empty()) {
       int index = noise_range.find_first_of(" ");
       std::string perturbed_utt_id = noise_range.substr(0, index);
       std::string noise_range_content = noise_range.substr(index+1);
