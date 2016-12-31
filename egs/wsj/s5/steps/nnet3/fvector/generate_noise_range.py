@@ -33,7 +33,8 @@
 # For <snr>, it was used to control the amplitude of noise
 # It will be randomly selected from the range (max-snr, min-snr)
 
-
+# At the same time, the function will generate the mapping of wav and perturbedwav
+# Each line contains a mapping. (e.g.: wav1 wav1-perturbed-1 wav1-perturbed-2 ...)
 from __future__ import print_function
 import re, os, argparse, sys, math, warnings, random
 
@@ -66,6 +67,9 @@ parser.add_argument("noise2dur",
                     "<utterance-id> <duration>")
 parser.add_argument("range_file",
                     help="Name of range file, e.g.: exp/fxvector/ranges")
+parser.add_argument("wav2perturbedwav",
+                    help="This file is used to store the mapping between wav and perturbedwav"
+                    "(e.g.: wav1 wav1-perturbed-1 wav1-perturbed-2 ...")
 
 print(' '.join(sys.argv))
 
@@ -113,10 +117,16 @@ def GenerateFixedLengthRangeFile():
     num_fixed_done = 0
     num_wav = len(wav_ids)
     num_noise = len(noise_ids)
+
     # create a file to record the ranges
     f = open(args.range_file, "w")
     if f is None:
         sys.exit("Error open file " + args.range_file)
+    
+    # create a file to record the wav2perturbedwav
+    g = open(args.wav2perturbedwav, "w")
+    if g is None:
+        sys.exit("Error open file " + args.wav2perturbedwav)
 
     for i in range(0, num_wav):
         # decide the number of noises which will be add to 
@@ -127,12 +137,18 @@ def GenerateFixedLengthRangeFile():
             print( "Warning: The number of noise files or the --min-additive-noise-len is too small" )
             num_fixed_error += 1
             continue
-        
+
+        # print the wav_id
+        print("{0}".format(wav_ids[i]), end="", file=g)
+
         # We generate $num_ranges_per_wav ranges
         for j in range(0, args.num_ranges_per_wav):
             # print the perturbed wav id in the beginning of line
             print("{0}-{1}".format(wav_ids[i], "perturbed-"+str(j+1)), end=" ", file=f)
-            
+
+            # print the perturbedwav_id
+            print(" {0}-{1}".format(wav_ids[i], "perturbed-"+str(j+1)), end="", file=g)
+
             # select a number from [1 ... max_num_additive_noise]
             num_additive_noise = random.randint(1, max_num_additive_noise)
     
@@ -192,7 +208,10 @@ def GenerateFixedLengthRangeFile():
                                                    current_snr),
                   file=f)
 	    num_fixed_done += 1
+        # print the "\n"
+        print("\n", end="", file=g)
     f.close()
+    g.close()
     print('''Finished generating fixed_length range-file for all wav. Compare with our expect, it lacks %d ranges. Now we totally have %d noise ranges in the range-file.''' %(num_fixed_error, num_fixed_done) )
 
 # This function generates the variable-length range files
@@ -205,6 +224,11 @@ def GenerateVariableLengthRangeFile():
     if f is None:
         sys.exit("Error open file " + args.range_file)
 
+    # create a file to record the wav2perturbedwav
+    g = open(args.wav2perturbedwav, "w")
+    if g is None:
+        sys.exit("Error open file " + args.wav2perturbedwav)
+    
     for i in range(0, num_wav):
 
         # check the noise list has enough sample or not
@@ -216,10 +240,16 @@ def GenerateVariableLengthRangeFile():
             num_variable_error += 1
             continue
        
+        # print the wav_id
+        print("{0}".format(wav_ids[i]), end="", file=g)
+        
         # We generate $num_ranges_per_wav ranges
         for j in range(0, args.num_ranges_per_wav):
             # print the perturbed wav id in the beginning of line
             print("{0}-{1}".format(wav_ids[i], "perturbed-"+str(j+1)), end=" ", file=f)
+            
+            # print the perturbedwav_id
+            print(" {0}-{1}".format(wav_ids[i], "perturbed-"+str(j+1)), end="", file=g)
 
             # generate range file
             # format: wav_t_start:wav_t_end:noise_name:noise_t_start:noise_t_end:snr,
@@ -282,7 +312,9 @@ def GenerateVariableLengthRangeFile():
                                                    current_snr),
                   file=f)		
 	    num_variable_done += 1
+        print("\n", end="", file=g)
     f.close()
+    g.close()
     print('''Finished generating variable_length range-file for all wav. Compare with our expect, it lacks %d ranges. Now we totally have %d noise ranges in the range-file.''' %(num_variable_error, num_variable_done) )
 
 if __name__ == "__main__":

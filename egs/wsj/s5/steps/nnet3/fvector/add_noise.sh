@@ -6,6 +6,7 @@
 # So far, the script achieves the duration files of train dataset and noise
 # dataset seperately. Then, with the duration files, it will generate the range
 # file which is used to control the process about adding additive noise. 
+# At the same time, it will generate the mapping between wav and perturbedwav.
 
 # Begin Configuration section.
 stage=0
@@ -63,7 +64,7 @@ if [ $stage -le 0 ]; then
       --max-snr=$max_snr \
       --variable-len-additive-noise $variable_len_additive_noise \
       --seed=$seed \
-      $data/utt2dur $noise/utt2dur $dir/ranges
+      $data/utt2dur $noise/utt2dur $dir/ranges $dir/wav2perturbedwav
 fi
 
 exit 0
