@@ -144,10 +144,10 @@ def GenerateFixedLengthRangeFile():
         # We generate $num_ranges_per_wav ranges
         for j in range(0, args.num_ranges_per_wav):
             # print the perturbed wav id in the beginning of line
-            print("{0}-{1}".format(wav_ids[i], "perturbed-"+str(j+1)), end=" ", file=f)
+            print("{1}-{0}".format(wav_ids[i], "perturbed"+str(j+1)), end=" ", file=f)
 
             # print the perturbedwav_id
-            print(" {0}-{1}".format(wav_ids[i], "perturbed-"+str(j+1)), end="", file=g)
+            print(" {1}-{0}".format(wav_ids[i], "perturbed"+str(j+1)), end="", file=g)
 
             # select a number from [1 ... max_num_additive_noise]
             num_additive_noise = random.randint(1, max_num_additive_noise)
@@ -184,7 +184,7 @@ def GenerateFixedLengthRangeFile():
 	    # deal with the last noise, which cover the rest
             k = num_additive_noise - 1
 	    wav_t_start = float('{:.2f}'.format(k * additive_noise_len))
-            wav_t_end = current_wav_len
+            wav_t_end = float('{:.2f}'.format(current_wav_len))
 
 	    noise_index = random.randrange(0, num_noise)
             current_noise_name = noise_ids[noise_index]
@@ -246,14 +246,14 @@ def GenerateVariableLengthRangeFile():
         # We generate $num_ranges_per_wav ranges
         for j in range(0, args.num_ranges_per_wav):
             # print the perturbed wav id in the beginning of line
-            print("{0}-{1}".format(wav_ids[i], "perturbed-"+str(j+1)), end=" ", file=f)
+            print("{1}-{0}".format(wav_ids[i], "perturbed"+str(j+1)), end=" ", file=f)
             
             # print the perturbedwav_id
-            print(" {0}-{1}".format(wav_ids[i], "perturbed-"+str(j+1)), end="", file=g)
+            print(" {1}-{0}".format(wav_ids[i], "perturbed"+str(j+1)), end="", file=g)
 
             # generate range file
             # format: wav_t_start:wav_t_end:noise_name:noise_t_start:noise_t_end:snr,
-            the_rest = current_wav_len
+            the_rest = float('{:.2f}'.format(current_wav_len))
             wav_t_start = 0.0
             wav_t_end = 0.0
             while (the_rest > float(args.min_additive_noise_len)):

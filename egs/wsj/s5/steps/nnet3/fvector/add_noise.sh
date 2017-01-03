@@ -40,17 +40,31 @@ fi
 
 data=$1  # contain wav.scp
 noise=$2 # contain noise.scp 
-dir=$3   # eg: ranges/
+dir=$3   # eg: data/perturbed
 
 
 if [ ! -f $data/utt2dur ]; then
+  # remove the segments so that the duration corresponding to recording-id
+  if [ -f $data/segments ]; then
+    mv $data/segments $data/segments_backup
+  fi
   # get original clean wav's duration
-  utils/data/get_utt2dur.sh $data 
+  utils/data/get_utt2dur.sh $data
+  if [ -f $data/segments_backup ]; then
+    mv $data/segments_backup segments
+  fi
 fi
 
 if [ ! -f $noise/utt2dur ]; then
+  # remove the segments so that the duration corresponding to recording-id
+  if [ -f $data/segments ]; then
+    mv $data/segments $data/segments_backup
+  fi
   # get the duration of each noise file
   utils/data/get_utt2dur.sh $noise
+  if [ -f $data/segments_backup ]; then
+    mv $data/segments_backup segments
+  fi
 fi
 
 mkdir -p $dir/log
@@ -65,6 +79,15 @@ if [ $stage -le 0 ]; then
       --variable-len-additive-noise $variable_len_additive_noise \
       --seed=$seed \
       $data/utt2dur $noise/utt2dur $dir/ranges $dir/wav2perturbedwav
+  #if the segments is exist
+
 fi
 
+if [ $stage -le 1 ]; then
+  echo "$0: generate perturbed_wav_specifier"
+  $cmd $dir/log/generate_perturb_wav_specifier.log \
+    steps/nnet3/fvector/generate_perturb_wav_specifier.py \
+      --noise=$noise/wav.scp \
+      $data/wav.scp $dir/ranges $dir/wav2perturbedwav $dir/perturbed_wav.scp
+fi
 exit 0

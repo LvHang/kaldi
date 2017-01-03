@@ -88,12 +88,11 @@ for line in f:
     for i in range(1, len(wav_list)):
         current_perturbed_wav_id = wav_list[i]
         current_perturbed_wav_index = perturbed_range_ids.index(current_perturbed_wav_id)
-        print('''{0} {1} nnet3-fvector-perturb-signal --noise-scp=scp:{3} --noise=\"
-              {4}\" - |'''.format(current_perturbed_wav_id,
-                                wav_extend_files[current_wav_index],
-                                args.noise,
-                                perturbed_range_contents[current_perturbed_wav_index]),
-              file=g)
+        print('''{0} {1} nnet3-fvector-perturb-signal --noise-scp=scp:{2} --noise=\"{3}\" - |'''.format(
+            current_perturbed_wav_id,
+            wav_extended_files[current_wav_index],
+            args.noise,
+            perturbed_range_contents[current_perturbed_wav_index]),file=g)
 g.close()
 f.close()
 print("Finished generating the perturb_wav.scp")
