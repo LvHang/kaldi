@@ -42,30 +42,40 @@ data=$1  # contain wav.scp
 noise=$2 # contain noise.scp 
 dir=$3   # eg: data/perturbed
 
-
-if [ ! -f $data/utt2dur ]; then
-  # remove the segments so that the duration corresponding to recording-id
-  if [ -f $data/segments ]; then
-    mv $data/segments $data/segments_backup
+# remove the segments so that the duration corresponding to recording-id
+if [ -f $data/segments ]; then
+  mv $data/segments $data/segments_backup
+  if [ -f $data/utt2dur ]; then
+    mv $data/utt2dur $data/utt2dur.backup
+    utils/data/get_utt2dur.sh $data
+  else if
+    utils/data/get_utt2dur.sh $data
   fi
-  # get original clean wav's duration
-  utils/data/get_utt2dur.sh $data
-  if [ -f $data/segments_backup ]; then
-    mv $data/segments_backup segments
-  fi
+  mv $data/segments_backup $data/segments
+else if
+  if [ ! -f $data/utt2dur ]; then
+    # get original clean wav's duration
+    utils/data/get_utt2dur.sh $data
+  fi 
 fi
 
-if [ ! -f $noise/utt2dur ]; then
-  # remove the segments so that the duration corresponding to recording-id
-  if [ -f $data/segments ]; then
-    mv $data/segments $data/segments_backup
+# remove the segments so that the duration corresponding to recording-id
+if [ -f $noise/segments ]; then
+  mv $noise/segments $noise/segments_backup
+  if [ -f $noise/utt2dur ]; then
+    mv $noise/utt2dur $noise/utt2dur.backup
+    utils/data/get_utt2dur.sh $noise
+  else if
+    utils/data/get_utt2dur.sh $noise
   fi
-  # get the duration of each noise file
-  utils/data/get_utt2dur.sh $noise
-  if [ -f $data/segments_backup ]; then
-    mv $data/segments_backup segments
-  fi
+  mv $noise/segments_backup $noise/segments
+else if
+  if [ ! -f $noise/utt2dur ]; then
+    # get original clean wav's duration
+    utils/data/get_utt2dur.sh $noise
+  fi 
 fi
+
 
 mkdir -p $dir/log
 if [ $stage -le 0 ]; then
@@ -90,4 +100,12 @@ if [ $stage -le 1 ]; then
       --noise=$noise/wav.scp \
       $data/wav.scp $dir/ranges $dir/wav2perturbedwav $dir/perturbed_wav.scp
 fi
+
+if [ -f $data/utt2dur.backup ]; then
+  mv $data/utt2dur.backup $data/utt2dur
+fi
+if [ -f $noise/utt2dur.backup ]; then
+  mv $noise/utt2dur.backup $noise/utt2dur
+fi
+
 exit 0
