@@ -48,11 +48,11 @@ if [ -f $data/segments ]; then
   if [ -f $data/utt2dur ]; then
     mv $data/utt2dur $data/utt2dur.backup
     utils/data/get_utt2dur.sh $data
-  else if
+  else
     utils/data/get_utt2dur.sh $data
   fi
   mv $data/segments_backup $data/segments
-else if
+else
   if [ ! -f $data/utt2dur ]; then
     # get original clean wav's duration
     utils/data/get_utt2dur.sh $data
@@ -65,11 +65,11 @@ if [ -f $noise/segments ]; then
   if [ -f $noise/utt2dur ]; then
     mv $noise/utt2dur $noise/utt2dur.backup
     utils/data/get_utt2dur.sh $noise
-  else if
+  else
     utils/data/get_utt2dur.sh $noise
   fi
   mv $noise/segments_backup $noise/segments
-else if
+else
   if [ ! -f $noise/utt2dur ]; then
     # get original clean wav's duration
     utils/data/get_utt2dur.sh $noise
@@ -89,8 +89,6 @@ if [ $stage -le 0 ]; then
       --variable-len-additive-noise $variable_len_additive_noise \
       --seed=$seed \
       $data/utt2dur $noise/utt2dur $dir/ranges $dir/wav2perturbedwav
-  #if the segments is exist
-
 fi
 
 if [ $stage -le 1 ]; then
@@ -98,7 +96,41 @@ if [ $stage -le 1 ]; then
   $cmd $dir/log/generate_perturb_wav_specifier.log \
     steps/nnet3/fvector/generate_perturb_wav_specifier.py \
       --noise=$noise/wav.scp \
-      $data/wav.scp $dir/ranges $dir/wav2perturbedwav $dir/perturbed_wav.scp
+      $data/wav.scp $dir/ranges $dir/wav2perturbedwav $dir/wav.scp
+fi
+
+if [ $stage -le 2 ]; then
+  echo "$0: generate other files in data directory"
+  #reco2file_and_channel
+  cat $dir/wav2perturbedwav | cut -d ' ' -f 1 | paste -d ' ' - $dir/wav2perturbedwav > $dir/perturb_recording_map
+  steps/nnet3/fvector/apply_map_one2mult.pl -f 1 $dir/perturb_recording_map <$data/reco2file_and_channel >$dir/reco2file_and_channel
+  if [ -f $data/segments ]; then
+    awk -v num=$num_ranges_per_wav '{
+      printf("%s %s",$1, $1);
+      for(i=1; i<= num; i++){ printf(" %s%s-%s","perturb", i, $1); }
+      printf("\n");
+    }' <$data/segments > $dir/perturb_utt_map
+    cat $dir/perturb_recording_map > $dir/perturb_map
+    cat $dir/perturb_utt_map >> $dir/perturb_map
+    #segments
+    steps/nnet3/fvector/apply_map_one2mult.pl -f 1 $dir/perturb_map <$data/segments >$dir/segments
+    #text
+    steps/nnet3/fvector/apply_map_one2mult.pl -f 1 $dir/perturb_map <$data/text >$dir/text
+    #utt2spk
+    steps/nnet3/fvector/apply_map_one2mult.pl -f 1 $dir/perturb_map <$data/utt2spk >$dir/utt2spk
+    #spk2utt
+    utt2spk_to_spk2utt.pl <$dir/utt2spk | sort > $dir/spk2utt
+  else #no segments->wav indexed by utterence-id/<recording-id> is equal to <utt-id>
+    cp $dir/perturb_recording_map $dir/perturb_map
+    #segments
+    steps/nnet3/fvector/apply_map_one2mult.pl -f 1 $dir/perturb_map <$data/segments >$dir/segments
+    #text
+    steps/nnet3/fvector/apply_map_one2mult.pl -f 1 $dir/perturb_map <$data/text >$dir/text
+    #utt2spk
+    steps/nnet3/fvector/apply_map_one2mult.pl -f 1 $dir/perturb_map <$data/utt2spk >$dir/utt2spk
+    #spk2utt
+    utt2spk_to_spk2utt.pl <$dir/utt2spk | sort > $dir/spk2utt
+  fi
 fi
 
 if [ -f $data/utt2dur.backup ]; then
