@@ -113,7 +113,13 @@ if [ $stage -le 2 ]; then
     cat $dir/perturb_recording_map > $dir/perturb_map
     cat $dir/perturb_utt_map >> $dir/perturb_map
     #segments
-    steps/nnet3/fvector/apply_map_one2mult.pl -f 1 $dir/perturb_map <$data/segments >$dir/segments
+    steps/nnet3/fvector/apply_map_one2mult.pl -f 1 $dir/perturb_map <$data/segments | \
+    awk '{
+       uttid=$1; start_time=$3; end_time=$4;
+       split(uttid,S,"[_]");
+       recordingid=S[1];
+       print uttid " " recordingid " " start_time " " end_time
+    }' >$dir/segments
     #text
     steps/nnet3/fvector/apply_map_one2mult.pl -f 1 $dir/perturb_map <$data/text >$dir/text
     #utt2spk
@@ -123,7 +129,13 @@ if [ $stage -le 2 ]; then
   else #no segments->wav indexed by utterence-id/<recording-id> is equal to <utt-id>
     cp $dir/perturb_recording_map $dir/perturb_map
     #segments
-    steps/nnet3/fvector/apply_map_one2mult.pl -f 1 $dir/perturb_map <$data/segments >$dir/segments
+    steps/nnet3/fvector/apply_map_one2mult.pl -f 1 $dir/perturb_map <$data/segments | \
+    awk '{
+       uttid=$1; start_time=$3; end_time=$4;
+       split(uttid,S,"[_]");
+       recordingid=S[1];
+       print uttid " " recordingid " " start_time " " end_time
+    }' >$dir/segments
     #text
     steps/nnet3/fvector/apply_map_one2mult.pl -f 1 $dir/perturb_map <$data/text >$dir/text
     #utt2spk
