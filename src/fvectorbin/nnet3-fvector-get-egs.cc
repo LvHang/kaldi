@@ -1,6 +1,6 @@
 // fvectorbin/nnet3-fvector-get-egs.cc
 
-// Copyright 2016  Johns Hopkins University (author:  Daniel Povey)
+// Copyright 2012-2016  Johns Hopkins University (author:  Daniel Povey)
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -19,67 +19,71 @@
 
 #include <sstream>
 
-#include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "hmm/transition-model.h"
-#include "hmm/posterior.h"
 #include "nnet3/nnet-example.h"
 
 namespace kaldi {
 namespace nnet3 {
 
+// A struct for holding information about the position and
+// duration of each pair of chunks.
+struct FvectorChunkPairInfo {
+  std::string pair_name;
+  std::string utt_a;
+  std::string utt_b;
+  int32 output_archive_id;
+  int32 start_frame;
+  int32 num_frames;
+};
 
-static void ProcessFile(const MatrixBase<BaseFloat> &feats,
-                        const std::string &utt_id,
-                        bool compress,
-                        int32 left_context,
-                        int32 right_context,
-                        int32 frames_per_eg,
-                        int64 *num_frames_written,
-                        int64 *num_egs_written,
-                        NnetExampleWriter *example_writer) {
-  for (int32 t = 0; t < feats.NumRows(); t += frames_per_eg) {
+// Process the range input file and store it as a map from utterance
+// name to vector of ChunkPairInfo structs.
+static void ProcessRangeFile(const std::string &range_rxfilename,
+                             std::vector<FvectorChunkPairInfo *> *pairs) {
+  Input range_input(range_rxfilename);
+  if (!range_rxfilename.empty()) {
+    std::string line;
+    while (std::getline(range_input.Stream(), line)) {
+      FvectorChunkPairInfo *pair = new FvectorChunkPairInfo();
+      std::vector<std::string> fields;
+      SplitStringToVector(line, " \t\n\r", true, &fields);
+      if (fields.size() != 6) {
+        KALDI_ERR << "Expected 6 fields in line of range file, got "
+                  << fields.size() << " instead.";
+      }
 
-    // actual_frames_per_eg is the number of frames in center.
-    // At the end of the file we pad with zero posteriors
-    // so that all examples have the same structure (prevents the need
-    // for recompilations).
-    int32 actual_frames_per_eg = std::min(frames_per_eg,
-                                          feats.NumRows() - t);
+      std::string utt_a = fields[0],
+                  utt_b = fields[1],
+                  start_frame_str = fields[4],
+                  num_frames_str = fields[5];
 
-    int32 tot_frames = left_context + frames_per_eg + right_context;
+      if (!ConvertStringToInteger(fields[2], &(pair->output_archive_id)) ||
+          !ConvertStringToInteger(start_frame_str, &(pair->start_frame)) ||
+          !ConvertStringToInteger(num_frames_str, &(pair->num_frames))) {
+        KALDI_ERR << "Expected integer for output archive in range file.";
+      }
+      pair->pair_name = utt_a + "-" + utt_b + "-" + start_frame_str + "-"
+                        + num_frames_str;
+      pair->utt_a = utt_a;
+      pair->utt_b = utt_b;
 
-    Matrix<BaseFloat> input_frames(tot_frames, feats.NumCols(), kUndefined);
-    
-    // Set up "input_frames".
-    for (int32 j = -left_context; j < frames_per_eg + right_context; j++) {
-      int32 t2 = j + t;
-      if (t2 < 0) t2 = 0;
-      if (t2 >= feats.NumRows()) t2 = feats.NumRows() - 1;
-      SubVector<BaseFloat> src(feats, t2),
-                           dest(input_frames, j + left_context);
-      dest.CopyFromVec(src);
+      pairs->push_back(pair);
     }
-
-    NnetExample eg;
-    
-    // call the regular input "input".
-    eg.io.push_back(NnetIo("input", -left_context, input_frames));
-   
-    if (compress) { eg.Compress();}
-      
-    std::ostringstream os;
-    os << utt_id << "-" << t;
-
-    std::string key = os.str(); // key is <utt_id>-<frame_id>
-
-    *num_frames_written += actual_frames_per_eg;
-    *num_egs_written += 1;
-
-    example_writer->Write(key, eg);
   }
 }
 
+// Delete the dynamically allocated memory.
+static void Cleanup(std::vector<FvectorChunkPairInfo *> *pairs,
+                    std::vector<NnetExampleWriter *> *writers) {
+  for (std::vector<NnetExampleWriter *>::iterator
+      it = writers->begin(); it != writers->end(); ++it) {
+    delete *it;
+  }
+  for (std::vector<FvectorChunkPairInfo *>::iterator it = pairs->begin();
+       it != pairs->end(); ++it) {
+    delete *it;
+  }
+}
 
 } // namespace nnet3
 } // namespace kaldi
@@ -89,65 +93,117 @@ int main(int argc, char *argv[]) {
     using namespace kaldi;
     using namespace kaldi::nnet3;
     typedef kaldi::int32 int32;
-    typedef kaldi::int64 int64;
 
     const char *usage =
-        "Get frame-by-frame examples of data for nnet3 neural network training.\n"
-        "Essentially this is a format change from features into a special frame-by-frame format.\n"
-        "This program handles the common case where you have some input features\n"
-        "and convert them to fvector examples format\n"
-        "Note: In fvector version, there is no need for iVectors, posterior and labels.\n"
+        "Get examples for training an nnet3 neural network for the fvector\n"
+        "system.  Each output example contains a pair of feature chunks from\n"
+        "the specified utterance.  The location and length of the feature chunks\n"
+        "are specified in the 'ranges' file.  Each line is interpreted as\n"
+        "follows:\n"
+        "<source-utterance1> <source-utterance2> <relative-output-archive-index> "
+        "<absolute-archive-index>  <start-frame> <num-frames1> "
+        "<start-frame-index2> <num-frames2>\n"
+        "where <relative-output-archive-index> is interpreted as a zero-based\n"
+        "index into the wspecifiers specified on the command line (<egs-0-out>\n"
+        "and so on), and <absolute-archive-index> is ignored by this program.\n"
+        "For example:\n"
+        "  utt1-p1 utt1-p2 3  13  5   65\n"
+        "  utt2    utt2-pn 0  10  160 50\n"
         "\n"
-        "Usage:  nnet3-fvector-get-egs [options] <features-rspecifier> <egs-out>\n"
+        "Usage:  nnet3-fvector-get-egs [options] <ranges-filename> "
+        "<features-rspecifier> <egs-0-out> <egs-1-out> ... <egs-N-1-out>\n"
         "\n"
-        "An example [where $feats expands to the actual features]:\n"
-        "nnet3-fvector-get-egs --left-context=12 --right-context=9 --compress=true \"$feats\" \\\n"
-        "\"ark:train.egs\"\n";
-        
+        "For example:\n"
+        "nnet3-fvector-get-egs ranges.1 \"$feats\" ark:egs_temp.1.ark"
+        "  ark:egs_temp.2.ark ark:egs_temp.3.ark\n";
 
     bool compress = true;
-    int32 left_context = 0, right_context = 0, num_frames = 1;
-    
+
     ParseOptions po(usage);
     po.Register("compress", &compress, "If true, write egs in "
                 "compressed format.");
-    po.Register("left-context", &left_context, "Number of frames of left "
-                "context the neural net requires.");
-    po.Register("right-context", &right_context, "Number of frames of right "
-                "context the neural net requires.");
-    po.Register("num-frames", &num_frames, "Number of frames is central");
-    
+
     po.Read(argc, argv);
 
-    if (po.NumArgs() != 2) {
+    if (po.NumArgs() < 3) {
       po.PrintUsage();
       exit(1);
     }
 
-    std::string feature_rspecifier = po.GetArg(1),
-                examples_wspecifier = po.GetArg(2);
+    std::string range_rspecifier = po.GetArg(1);
+    std::string feature_rspecifier = po.GetArg(2);
+    std::vector<NnetExampleWriter *> example_writers;
 
-    // Read in all the training files.
-    SequentialBaseFloatMatrixReader feat_reader(feature_rspecifier);
-    NnetExampleWriter example_writer(examples_wspecifier);
-    
-    int32 num_done = 0;
-    int64 num_frames_written = 0, num_egs_written = 0;
-    
-    for (; !feat_reader.Done(); feat_reader.Next()) {
-      std::string key = feat_reader.Key();
-      const Matrix<BaseFloat> &feats = feat_reader.Value();
-      ProcessFile(feats, key, compress, left_context, right_context,
-                  num_frames, &num_frames_written, &num_egs_written,
-                  &example_writer);
-      num_done++;
+    for (int32 i = 3; i <= po.NumArgs(); i++) {
+      example_writers.push_back(new NnetExampleWriter(po.GetArg(i)));
     }
 
+    std::vector<FvectorChunkPairInfo *> pairs;
+    // deal with the ranges file and initalize the vector
+    ProcessRangeFile(range_rspecifier, &pairs);
+
+    RandomAccessBaseFloatMatrixReader feature_reader(feature_rspecifier);
+
+    int32 num_error = 0,
+          num_egs_written = 0;
+
+    for (std::vector<FvectorChunkPairInfo *>::iterator iter = pairs.begin();
+         iter != pairs.end(); iter++) {
+
+      FvectorChunkPairInfo *pair = *iter;
+      // get the features
+      if (!feature_reader.HasKey(pair->utt_a) || !feature_reader.HasKey(pair->utt_b)) {
+        num_error++;
+        KALDI_WARN << "The feature " << pair->utt_a << " or " << pair->utt_b
+                   << " is not found.";
+        continue;
+      }
+      const Matrix<BaseFloat> &feats_a = feature_reader.Value(pair->utt_a);
+      const Matrix<BaseFloat> &feats_b = feature_reader.Value(pair->utt_b);
+      int32 num_rows = feats_a.NumRows(),
+            feat_dim = feats_a.NumCols();
+      if (num_rows < (pair->start_frame + pair->num_frames)) {
+        num_error++;
+        KALDI_WARN << "Unable to create examples for utterance " << pair->pair_name
+                   << ". Requested chunk boundary is the "
+                   << (pair->start_frame + pair->num_frames)
+                   << "th frmae, but utterance has only " << num_rows << " frames.";
+        continue;
+      } else {
+        SubMatrix<BaseFloat> chunk1(feats_a, pair->start_frame,
+                                    pair->num_frames, 0, feat_dim),
+                             chunk2(feats_b, pair->start_frame,
+                                    pair->num_frames, 0, feat_dim);
+        NnetIo nnet_io1 = NnetIo("input", 0, chunk1),
+               nnet_io2 = NnetIo("input", 0, chunk2);
+        for (std::vector<Index>::iterator indx_it = nnet_io1.indexes.begin();
+            indx_it != nnet_io1.indexes.end(); ++indx_it) {
+          indx_it->n = 0;
+        }
+        for (std::vector<Index>::iterator indx_it = nnet_io2.indexes.begin();
+            indx_it != nnet_io2.indexes.end(); ++indx_it) {
+          indx_it->n = 1;
+        }
+        NnetExample eg;
+        eg.io.push_back(nnet_io1);
+        eg.io.push_back(nnet_io2);
+        if (compress)
+          eg.Compress();
+
+        if (pair->output_archive_id >= example_writers.size()) {
+          KALDI_ERR << "Requested output index exceeds number of specified "
+                    << "output files.";
+        }
+        example_writers[pair->output_archive_id]->Write(pair->pair_name, eg);
+        num_egs_written += 1;
+      }
+    }
+    Cleanup(&pairs, &example_writers);
+
     KALDI_LOG << "Finished generating examples, "
-              << "successfully processed " << num_done
-              << " feature files, wrote " << num_egs_written << " examples, "
-              << " with " << num_frames_written << " egs in total.";
-    return (num_egs_written == 0 || num_done == 0 ? 1 : 0);
+              << "successfully wrote " << num_egs_written << " examples; "
+              << num_error << " files had errors.";
+    return (num_egs_written == 0);
   } catch(const std::exception &e) {
     std::cerr << e.what() << '\n';
     return -1;
