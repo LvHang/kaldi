@@ -6,7 +6,7 @@ include ../kaldi.mk
 LDFLAGS += $(CUDA_LDFLAGS)
 LDLIBS += $(CUDA_LDLIBS)
 
-BINFILES = nnet3-fvector-get-egs nnet3-fvector-perturb-signal
+BINFILES = nnet3-fvector-get-egs nnet3-fvector-perturb-signal nnet3-fvector-get-egs-simple
 
 OBJFILES =
 

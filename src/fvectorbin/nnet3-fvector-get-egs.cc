@@ -158,21 +158,26 @@ int main(int argc, char *argv[]) {
                    << " is not found.";
         continue;
       }
-      const Matrix<BaseFloat> &feats_a = feature_reader.Value(pair->utt_a);
-      const Matrix<BaseFloat> &feats_b = feature_reader.Value(pair->utt_b);
+      const Matrix<BaseFloat> feats_a = feature_reader.Value(pair->utt_a);
+      const Matrix<BaseFloat> feats_b = feature_reader.Value(pair->utt_b);
       int32 num_rows = feats_a.NumRows(),
             feat_dim = feats_a.NumCols();
-      if (num_rows < (pair->start_frame + pair->num_frames)) {
+      if (num_rows < pair->num_frames) {
         num_error++;
         KALDI_WARN << "Unable to create examples for utterance " << pair->pair_name
-                   << ". Requested chunk boundary is the "
-                   << (pair->start_frame + pair->num_frames)
-                   << "th frmae, but utterance has only " << num_rows << " frames.";
+                   << ". Requested chunk size is "
+                   << pair->num_frames
+                   << ", but utterance has only " << num_rows << " frames.";
         continue;
       } else {
-        SubMatrix<BaseFloat> chunk1(feats_a, pair->start_frame,
+        // As the utt2len file is not the exact frames of a utterance, so the
+        // requested chunk positions are approximate. It's possible that they
+        // slightly exceed the number of frames in the utterance.
+        // If that occurs, we can shift the chunks location back slightly.
+        int32 shift = std::min(0, num_rows - pair->start_frame - pair->num_frames);
+        SubMatrix<BaseFloat> chunk1(feats_a, pair->start_frame + shift,
                                     pair->num_frames, 0, feat_dim),
-                             chunk2(feats_b, pair->start_frame,
+                             chunk2(feats_b, pair->start_frame + shift,
                                     pair->num_frames, 0, feat_dim);
         NnetIo nnet_io1 = NnetIo("input", 0, chunk1),
                nnet_io2 = NnetIo("input", 0, chunk2);

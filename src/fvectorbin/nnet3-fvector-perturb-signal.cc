@@ -61,10 +61,10 @@ void GenerateController(std::vector<std::string> &segments,
 }
 
 void ApplyNoise(std::string &noise_scp, const std::vector<AdditiveNoiseRange> &controller,
-                const VectorBase<BaseFloat> &input_wav, VectorBase<BaseFloat> *perturbed_wav) {
+                const VectorBase<BaseFloat> &input_wav, const int &samp_freq_input,
+                VectorBase<BaseFloat> *perturbed_wav) {
   // about noise list
   RandomAccessTableReader<WaveHolder> noise_reader(noise_scp);
-  int samp_freq_input = input_wav.Dim();
 
   // add noise
 
@@ -83,7 +83,35 @@ void ApplyNoise(std::string &noise_scp, const std::vector<AdditiveNoiseRange> &c
     int32 noise_start_point = samp_freq_noise * controller[i].noise_t_start;
     int32 noise_end_point = samp_freq_noise * controller[i].noise_t_end - 1;
     BaseFloat snr = controller[i].snr;
+    // This part is used to deal with the precise problem.
+    // e.g. If the wav_t_start = 259.49, the sample frequency is 8000. In theroy,
+    // the wav_start_point is 2075920, however, it will be 2075919 in practise.
+    int32 input_length = input_end_point - input_start_point + 1;
+    int32 noise_length = noise_end_point - noise_start_point + 1;
+    if (input_length != noise_length) {
+      int32 delta = (input_length > noise_length?(input_length - noise_length)
+                                                :(noise_length-input_length));
+      if (delta < 0.01*samp_freq_input) {
+        if (input_length > noise_length) {
+          input_end_point = input_end_point - delta;
+        } else {
+          noise_end_point = noise_end_point - delta;
+        }
+      } else {
+        KALDI_ERR << "There is a problem about input length does not match noise length"
+                  << " where the noise-id is: " << controller[i].noise_uttid
+                  << ", the input length is: " << input_length
+                  << ", the noise length is: " << noise_length << std::endl; 
+      }
+    }
 
+    // End sample must be less than total number
+    if ((input_end_point > input_wav.Dim()-1) || (noise_end_point > noise.Dim()-1)) {
+      int32 over_boundary = ((input_end_point - input_wav.Dim() + 1) > (noise_end_point - noise.Dim() + 1) ?
+                             (input_end_point - input_wav.Dim() + 1) : (noise_end_point - noise.Dim() + 1));
+      input_end_point = input_end_point - over_boundary;
+      noise_end_point = noise_end_point - over_boundary;
+    }
     // The input vector and noise vector contain the whole content of utt seperately.
     // According to the AdditiveNoiseRange, we stepwise add the additive noise to input.
     // To save the space, we use Subvector, because it returns the pointer.
@@ -159,18 +187,19 @@ int main(int argc, char *argv[]) {
     // Generate the Noise Controller list
     std::vector<AdditiveNoiseRange> controller;
     if (!noise_range.empty()) {
-      int index = noise_range.find_first_of(" ");
-      std::string perturbed_utt_id = noise_range.substr(0, index);
-      std::string noise_range_content = noise_range.substr(index+1);
+      //int index = noise_range.find_first_of(" ");
+      //std::string perturbed_utt_id = noise_range.substr(0, index);
+      //std::string noise_range_content = noise_range.substr(index+1);
       std::vector<std::string> segments;
-      SplitStringToVector(noise_range_content, ",", true, &segments);
+      SplitStringToVector(noise_range, ",", true, &segments);
       GenerateController(segments, &controller);
     }
 
+    bool binary = true;
     WaveData input_wave;
     {
       WaveHolder waveholder;
-      Input ki(input_wave_file);
+      Input ki(input_wave_file, &binary);
       waveholder.Read(ki.Stream());
       input_wave = waveholder.Value();
     }
@@ -189,14 +218,14 @@ int main(int argc, char *argv[]) {
 
     // new output vector and add noise
     Vector<BaseFloat> output(input);
-    ApplyNoise(noise, controller, input, &output);
+    ApplyNoise(noise, controller, input, samp_freq_input, &output);
 
     Matrix<BaseFloat> out_matrix(1, num_samp_input);
     out_matrix.CopyRowsFromVec(output);
 
     WaveData out_wave(samp_freq_input, out_matrix);
-    Output ko(output_wave_file, false);
-    out_wave.Write(ko.Stream());
+    Output ko(output_wave_file, binary, false);
+    WaveHolder::Write(ko.Stream(), true, out_wave);
 
     return 0;
   } catch(const std::exception &e) {
