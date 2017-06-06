@@ -1,22 +1,23 @@
 #!/bin/bash
 
-# same as 1g but with TDNN output dim 1024 instead of 512
-# (num-params 1g:21309812 1i: 43447156)
-# results on sdm1 using ihm ali
-#System               tdnn_lstm1g_sp_bi_ihmali_ld5 tdnn_lstm1i_sp_bi_ihmali_ld5
-#WER on dev        38.3      37.6
-#WER on eval        41.6      40.9
-#Final train prob      -0.138017 -0.114135
-#Final valid prob      -0.238659 -0.245208
-#Final train prob (xent)      -1.66834  -1.47648
-#Final valid prob (xent)      -2.17419  -2.16365
+# same as tdnn_lstm_1i but adding CNN and batchnorm also dropout
+
+# ./local/chain/compare_wer_general.sh sdm1 tdnn_lstm1i_sp_bi_ihmali_ld5 cnn_tdnn_lstm1i_sp_bi_ihmali_ld5
+# System               tdnn_lstm1i_sp_bi_ihmali_ld5 cnn_tdnn_lstm1i_sp_bi_ihmali_ld5
+# WER on dev        37.4      34.6
+# WER on eval        40.8      38.1
+# Final train prob        -0.1102 -0.138371
+# Final valid prob      -0.260827 -0.240463
+# Final train prob (xent)      -1.46214  -1.59601
+# Final valid prob (xent)       -2.1447  -2.07422
+
 
 
 set -e -o pipefail
 
 # First the options that are passed through to run_ivector_common.sh
 # (some of which are also used in this script directly).
-stage=0
+stage=15
 mic=ihm
 nj=30
 min_seg_len=1.55
@@ -31,6 +32,7 @@ num_epochs=4
 chunk_width=150
 chunk_left_context=40
 chunk_right_context=0
+dropout_schedule='0,0@0.20,0.3@0.50,0'
 label_delay=5
 # The rest are configs specific to this script.  Most of the parameters
 # are just hardcoded at this level, in the commands below.
@@ -43,6 +45,8 @@ common_egs_dir=  # you can set this to use previously dumped egs.
 # decode options
 extra_left_context=50
 frames_per_chunk=
+#decode options
+test_online_decoding=true  # if true, it will run the last decoding stage.
 
 # End configuration section.
 echo "$0 $@"  # Print the command line for logging
@@ -84,7 +88,7 @@ if $use_ihm_ali; then
   lores_train_data_dir=data/$mic/${train_set}_ihmdata_sp_comb
   tree_dir=exp/$mic/chain${nnet3_affix}/tree_bi${tree_affix}_ihmdata
   lat_dir=exp/$mic/chain${nnet3_affix}/${gmm}_${train_set}_sp_comb_lats_ihmdata
-  dir=exp/$mic/chain${nnet3_affix}/tdnn_lstm${tlstm_affix}_sp_bi_ihmali
+  dir=exp/$mic/chain${nnet3_affix}/cnn_tdnn_lstm${tlstm_affix}_sp_bi_ihmali
   # note: the distinction between when we use the 'ihmdata' suffix versus
   # 'ihmali' is pretty arbitrary.
 else
@@ -93,7 +97,7 @@ else
   lores_train_data_dir=data/$mic/${train_set}_sp_comb
   tree_dir=exp/$mic/chain${nnet3_affix}/tree_bi${tree_affix}
   lat_dir=exp/$mic/chain${nnet3_affix}/${gmm}_${train_set}_sp_comb_lats
-  dir=exp/$mic/chain${nnet3_affix}/tdnn_lstm${tlstm_affix}_sp_bi
+  dir=exp/$mic/chain${nnet3_affix}/cnn_tdnn_lstm${tlstm_affix}_sp_bi
 fi
 
 if [ $label_delay -gt 0 ]; then dir=${dir}_ld$label_delay; fi
@@ -185,22 +189,28 @@ if [ $stage -le 15 ]; then
   # as the layer immediately preceding the fixed-affine-layer to enable
   # the use of short notation for the descriptor
   fixed-affine-layer name=lda input=Append(-1,0,1,ReplaceIndex(ivector, t, 0)) affine-transform-file=$dir/configs/lda.mat
+  idct-layer name=idct input=input dim=40 cepstral-lifter=22 affine-transform-file=$dir/configs/idct.mat
+      
+  conv-relu-batchnorm-layer name=cnn1 input=idct height-in=40 height-out=20 height-subsample-out=2 time-offsets=-1,0,1 height-offsets=-1,0,1 num-filters-out=256 learning-rate-factor=0.333 max-change=0.25
+  conv-relu-batchnorm-layer name=cnn2 input=cnn1 height-in=20 height-out=20 time-offsets=-1,0,1 height-offsets=-1,0,1 num-filters-out=128
 
+  relu-batchnorm-layer name=affine1 input=lda dim=512
+ 
   # the first splicing is moved before the lda layer, so no splicing here
-  relu-renorm-layer name=tdnn1 dim=1024
-  relu-renorm-layer name=tdnn2 input=Append(-1,0,1) dim=1024
-  relu-renorm-layer name=tdnn3 input=Append(-1,0,1) dim=1024
+  relu-batchnorm-layer name=tdnn1 input=cnn2 dim=1024
+  relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1,affine1) dim=1024
+  relu-batchnorm-layer name=tdnn3 input=Append(-1,0,1) dim=1024
 
   # check steps/libs/nnet3/xconfig/lstm.py for the other options and defaults
-  lstmp-layer name=lstm1 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3
-  relu-renorm-layer name=tdnn4 input=Append(-3,0,3) dim=1024
-  relu-renorm-layer name=tdnn5 input=Append(-3,0,3) dim=1024
-  relu-renorm-layer name=tdnn6 input=Append(-3,0,3) dim=1024
-  lstmp-layer name=lstm2 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3
-  relu-renorm-layer name=tdnn7 input=Append(-3,0,3) dim=1024
-  relu-renorm-layer name=tdnn8 input=Append(-3,0,3) dim=1024
-  relu-renorm-layer name=tdnn9 input=Append(-3,0,3) dim=1024
-  lstmp-layer name=lstm3 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3
+  lstmp-layer name=lstm1 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 dropout-proportion=0.0 dropout-per-frame=true
+  relu-batchnorm-layer name=tdnn4 input=Append(-3,0,3) dim=1024
+  relu-batchnorm-layer name=tdnn5 input=Append(-3,0,3) dim=1024
+  relu-batchnorm-layer name=tdnn6 input=Append(-3,0,3) dim=1024
+  lstmp-layer name=lstm2 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 dropout-proportion=0.0 dropout-per-frame=true
+  relu-batchnorm-layer name=tdnn7 input=Append(-3,0,3) dim=1024
+  relu-batchnorm-layer name=tdnn8 input=Append(-3,0,3) dim=1024
+  relu-batchnorm-layer name=tdnn9 input=Append(-3,0,3) dim=1024
+  lstmp-layer name=lstm3 cell-dim=1024 recurrent-projection-dim=256 non-recurrent-projection-dim=256 delay=-3 dropout-proportion=0.0 dropout-per-frame=true
 
   ## adding the layers for chain branch
   output-layer name=output input=lstm3 output-delay=$label_delay include-log-softmax=false dim=$num_targets max-change=1.5
@@ -241,6 +251,7 @@ if [ $stage -le 16 ]; then
     --egs.chunk-width $chunk_width \
     --egs.chunk-left-context $chunk_left_context \
     --egs.chunk-right-context $chunk_right_context \
+    --trainer.dropout-schedule $dropout_schedule \
     --trainer.num-chunk-per-minibatch 64 \
     --trainer.frames-per-iter 1500000 \
     --trainer.num-epochs $num_epochs \
@@ -290,4 +301,33 @@ if [ $stage -le 18 ]; then
     exit 1
   fi
 fi
+
+if $test_online_decoding && [ $stage -le 19 ]; then
+  steps/online/nnet3/prepare_online_decoding.sh \
+    --mfcc-config conf/mfcc_hires.conf \
+    data/lang_${LM} exp/$mic/nnet3${nnet3_affix}/extractor ${dir} ${dir}_online
+
+  rm $dir/.error 2>/dev/null || true
+
+  [ -z $extra_left_context ] && extra_left_context=$chunk_left_context;
+  [ -z $frames_per_chunk ] && frames_per_chunk=$chunk_width;
+
+  for decode_set in dev eval; do
+    (
+      nspk=$(wc -l <data/$mic/${decode_set}_hires/spk2utt)
+      # note: we just give it "data/${data}" as it only uses the wav.scp, the
+      # feature type does not matter.
+      steps/online/nnet3/decode.sh \
+        --nj $nspk --cmd "$decode_cmd" \
+        --acwt 1.0 \
+        --extra-left-context-initial $extra_left_context \
+        --frames-per-chunk "$frames_per_chunk" \
+        --scoring-opts "--min-lmwt 5 " \
+        $graph_dir data/$mic/${decode_set}_hires ${dir}_online/decode_online_${decode_set} || exit 1
+    ) || touch ${dir}_online/.error &
+  done
+  wait
+  [ -f $dir/.error ] && echo "$0: there was a problem while decoding" && exit 1
+fi
+
 exit 0
