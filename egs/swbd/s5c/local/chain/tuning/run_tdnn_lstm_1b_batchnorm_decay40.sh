@@ -15,7 +15,7 @@
 set -e
 
 # configs for 'chain'
-stage=16
+stage=12
 train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
@@ -27,6 +27,8 @@ decode_nj=50
 # training options
 leftmost_questions_truncate=-1
 chunk_width=150
+frames_per_chunk=140,100,160
+frames_per_chunk_primary=$(echo $frame_per_chunk | cut -d, -f1)
 chunk_left_context=40
 chunk_right_context=0
 xent_regularize=0.025
@@ -177,8 +179,8 @@ if [ $stage -le 13 ]; then
     --chain.l2-regularize 0.00005 \
     --chain.apply-deriv-weights false \
     --chain.lm-opts="--num-extra-lm-states=2000" \
-    --trainer.num-chunk-per-minibatch 64 \
-    --trainer.frames-per-iter 1200000 \
+    --trainer.num-chunk-per-minibatch 64,32 \
+    --trainer.frames-per-iter 1500000 \
     --trainer.max-param-change 2.0 \
     --trainer.num-epochs 4 \
     --trainer.optimization.shrink-value 0.99 \
@@ -190,9 +192,11 @@ if [ $stage -le 13 ]; then
     --trainer.deriv-truncate-margin 8 \
     --egs.stage $get_egs_stage \
     --egs.opts "--frames-overlap-per-eg 0" \
-    --egs.chunk-width $chunk_width \
+    --egs.chunk-width $frames_per_chunk \
     --egs.chunk-left-context $chunk_left_context \
     --egs.chunk-right-context $chunk_right_context \
+    --egs.chunk-left-context-initial 0 \
+    --egs.chunk-right-context-final 0 \
     --egs.dir "$common_egs_dir" \
     --cleanup.remove-egs $remove_egs \
     --feat-dir data/${train_set}_hires \
@@ -211,9 +215,6 @@ fi
 decode_suff=sw1_tg
 graph_dir=$dir/graph_sw1_tg
 if [ $stage -le 15 ]; then
-  [ -z $extra_left_context ] && extra_left_context=$chunk_left_context;
-  [ -z $extra_right_context ] && extra_right_context=$chunk_right_context;
-  [ -z $frames_per_chunk ] && frames_per_chunk=$chunk_width;
   iter_opts=
   if [ ! -z $decode_iter ]; then
     iter_opts=" --iter $decode_iter "
@@ -222,9 +223,11 @@ if [ $stage -le 15 ]; then
       (
        steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
           --nj 50 --cmd "$decode_cmd" $iter_opts \
-          --extra-left-context $extra_left_context  \
-          --extra-right-context $extra_right_context  \
-          --frames-per-chunk "$frames_per_chunk" \
+          --extra-left-context $extra_left_context \
+          --extra-right-context $extra_right_context \
+          --extra-left-context-initial 0 \
+          --extra-right-context-final 0 \
+          --frames-per-chunk "$frames_per_chunk_primary" \
           --online-ivector-dir exp/nnet3/ivectors_${decode_set} \
          $graph_dir data/${decode_set}_hires \
          $dir/decode_${decode_set}${decode_dir_affix:+_$decode_dir_affix}_${decode_suff} || exit 1;
@@ -252,7 +255,7 @@ if $test_online_decoding && [ $stage -le 16 ]; then
       # feature type does not matter.
 
       steps/online/nnet3/decode.sh --nj $decode_nj --cmd "$decode_cmd" $iter_opts \
-          --acwt 1.0 --post-decode-acwt 10.0 \
+          --acwt 1.0 --post-decode-acwt 10.0 --extra-left-context-initial $chunk_left_context \
          $graph_dir data/${decode_set}_hires \
          ${dir}_online/decode_${decode_set}${decode_iter:+_$decode_iter}_sw1_tg || exit 1;
       if $has_fisher; then
