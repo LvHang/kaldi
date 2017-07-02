@@ -15,7 +15,7 @@
 set -e
 
 # configs for 'chain'
-stage=12
+stage=15
 train_stage=-10
 get_egs_stage=-10
 speed_perturb=true
@@ -28,7 +28,7 @@ decode_nj=50
 leftmost_questions_truncate=-1
 chunk_width=150
 frames_per_chunk=140,100,160
-frames_per_chunk_primary=$(echo $frame_per_chunk | cut -d, -f1)
+frames_per_chunk_primary=$(echo $frames_per_chunk | cut -d, -f1)
 chunk_left_context=40
 chunk_right_context=0
 xent_regularize=0.025
