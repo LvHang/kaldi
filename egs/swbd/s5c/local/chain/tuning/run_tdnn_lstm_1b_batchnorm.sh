@@ -253,7 +253,7 @@ if $test_online_decoding && [ $stage -le 16 ]; then
       # feature type does not matter.
 
       steps/online/nnet3/decode.sh --nj $decode_nj --cmd "$decode_cmd" $iter_opts \
-          --acwt 1.0 --post-decode-acwt 10.0 --extra-left-context-initial $chunk_left_context \
+          --acwt 1.0 --post-decode-acwt 10.0 \
          $graph_dir data/${decode_set}_hires \
          ${dir}_online/decode_${decode_set}${decode_iter:+_$decode_iter}_sw1_tg || exit 1;
       if $has_fisher; then
