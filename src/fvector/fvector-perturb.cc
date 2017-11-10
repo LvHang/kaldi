@@ -29,7 +29,7 @@ void FvectorPerturb::ApplyPerturbation(const MatrixBase<BaseFloat>& input_chunk,
       
       Vector<BaseFloat> speed_input_vector(original_dim_matrix.Row(i));
       
-      MatrixIndexT speed_output_dim = static_cast<MatrixIndexT>(original_dim_matrix.NumCols() / factor);
+      MatrixIndexT speed_output_dim = static_cast<MatrixIndexT>(ceil(original_dim_matrix.NumCols() / factor));
       KALDI_ASSERT(speed_output_dim >= opts_.expected_chunk_length * opts_.sample_frequency / 1000);
       Vector<BaseFloat> speed_output_vector(speed_output_dim);
 

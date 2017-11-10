@@ -5,7 +5,7 @@ OPENFST_CXXFLAGS =
 OPENFST_LDLIBS =
 include ../kaldi.mk
 
-TESTFILES =
+TESTFILES = fvector-perturb-test
 
 OBJFILES = fvector-perturb.o
 
