@@ -6,7 +6,9 @@ int main(int argc, char *argv[]) {
   try {
     using namespace kaldi;
     const char *usage =
-        "Perturb the chunk data.\n"
+        "Perturb the chunk data. Each input chunk is a four-lines matrix(S1, S2, N1, N2).\n"
+        "After use 4 kinds of perturbation opertation, each output chunk is a 2-lines matrix.\n"
+        "The two lines come from the same source wavform signal, but now they are different.\n"
         "Usage:  fvector-add-noise [options...] <chunk-rspecifier> <perturbed-wspecifier>\n";
 
     // construct all the global objects
@@ -33,6 +35,9 @@ int main(int argc, char *argv[]) {
       const Matrix<BaseFloat> &input_chunk = chunk_reader.Value();
       // whole_chunk has 4 lines, it copies the first line and will be operate.
       Matrix<BaseFloat> whole_chunk(4, input_chunk.NumCols());
+      // For here, we copy the first line. So in the "whole_chunk" the first
+      // two lines come from the same source wavform signal. And the third/forth
+      // line is the random noise.
       MatrixIndexT indices[4] = {0, 0, 1, 2};
       whole_chunk.CopyRows(input_chunk, indices);
       Matrix<BaseFloat> perturbed_chunk;
