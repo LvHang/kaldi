@@ -1,7 +1,6 @@
 #include "fvector/fvector-perturb.h"
 
 namespace kaldi {
-namespace nnet3 {
 
 void FvectorPerturb::ApplyPerturbation(const MatrixBase<BaseFloat>& input_chunk,
                                        Matrix<BaseFloat>* perturbed_chunk) {
@@ -21,26 +20,26 @@ void FvectorPerturb::ApplyPerturbation(const MatrixBase<BaseFloat>& input_chunk,
     //always smaller than original_length) for each line.
     //(1) a=min{original_length/expected_length -1, max-speed-perturb-rate}
     //(2) the range of factor is (1-a, 1+a)
-    BaseFloat boundary = std::min((input_chunk.NumCols() / opts_.sample_frequency) / opts_expected_chunk_length - 1,
-                                  opts_,max_speed_perturb_rate);
+    BaseFloat boundary = std::min((input_chunk.NumCols() / opts_.sample_frequency) / opts_.expected_chunk_length - 1,
+                                  opts_.max_speed_perturb_rate);
     for (MatrixIndexT i = 0; i < original_dim_matrix.NumRows(); ++i) {
       //caculate the speed factor
-      BaseFloat factor =static_cast<BaseFloat> RandInt(
-          (int)((1-boundary)*100),(int)((1+boundary)*100)) * 1.0 / 100.0;
+      BaseFloat factor =static_cast<BaseFloat> (RandInt(
+          (int)((1-boundary)*100),(int)((1+boundary)*100)) * 1.0 / 100.0);
       
       Vector<BaseFloat> speed_input_vector(original_dim_matrix.Row(i));
       
       MatrixIndexT speed_output_dim = static_cast<MatrixIndexT>(original_dim_matrix.NumCols() / factor);
       KALDI_ASSERT(speed_output_dim >= opts_.expected_chunk_length * opts_.sample_frequency / 1000);
-      Vector<BaseFloat> speed_output_vector(output_dim);
+      Vector<BaseFloat> speed_output_vector(speed_output_dim);
 
       SpeedPerturbation(speed_input_vector, opts_.sample_frequency, factor, &speed_output_vector);
       
       Vector<BaseFloat> time_shifted_vector(expected_dim_matrix.NumCols());
       if (opts_.time_shift) {
-        TimeShift(speed_output_vector, &time_shifted_vecotr);
+        TimeShift(speed_output_vector, &time_shifted_vector);
       } else {
-        time_shifted_vector.CopyFromVec(speed_output_vector.Range(0, expected_dim_matrix.NumCols());
+        time_shifted_vector.CopyFromVec(speed_output_vector.Range(0, expected_dim_matrix.NumCols()));
       }
       expected_dim_matrix.CopyRowFromVec(time_shifted_vector, i); 
     }
@@ -96,17 +95,17 @@ void FvectorPerturb::SpeedPerturbation(VectorBase<BaseFloat>& input_vector,
                                        BaseFloat speed_factor,
                                        VectorBase<BaseFloat>* output_vector) {
   if (speed_factor == 1.0) {
-    output_vector->Swap(&input_vector);
+    output_vector->CopyFromVec(input_vector);
   } else {
     Vector<BaseFloat> in_vec(input_vector),
                       out_vec(output_vector->Dim());
-    int32 input_dim = in_vec.Dim();
+    int32 input_dim = in_vec.Dim(),
           output_dim = out_vec.Dim();
     Vector<BaseFloat> samp_points_secs(output_dim);
     int32 num_zeros = 4; // Number of zeros of the sinc function that the window extends out to.
     // lowpass frequency that's lower than 95% of the Nyquist.
     BaseFloat filter_cutoff_hz = samp_freq * 0.475; 
-    for (int32 i = 0; i < dim; i++) {
+    for (int32 i = 0; i < output_dim; i++) {
       samp_points_secs(i) = static_cast<BaseFloat>(speed_factor * i / samp_freq);
     }
     ArbitraryResample time_resample(input_dim, samp_freq,
@@ -114,8 +113,8 @@ void FvectorPerturb::SpeedPerturbation(VectorBase<BaseFloat>& input_vector,
                                     samp_points_secs,
                                     num_zeros);
     time_resample.Resample(in_vec, &out_vec);
+    output_vector->CopyFromVec(out_vec);
   }
-  output_vector->CopyFromVec(out_vec);
 }
 
 void FvectorPerturb::TimeShift(VectorBase<BaseFloat>& input_vector,
@@ -134,17 +133,16 @@ void FvectorPerturb::AddNoise(MatrixBase<BaseFloat>* chunk) {
   //2. add N1(line3) to S1(line1) with snr1
   //   add N2(line4) to S2(line2) with snr2
   for (MatrixIndexT i = 0; i < 2; i++) {
-    Vector<BaseFloat> source(chunk.Row(i));
-    Vector<BaseFloat> noise(chunk.Row(i+2));
+    Vector<BaseFloat> source(chunk->Row(i));
+    Vector<BaseFloat> noise(chunk->Row(i+2));
     BaseFloat source_energy = VecVec(source, source);
     BaseFloat noise_energy = VecVec(noise, noise);
     // The smaller the value, the greater the snr
     int32 snr = RandInt(opts_.max_snr, opts_.min_snr);
     BaseFloat scale_factor = sqrt(source_energy/ noise_energy / (pow(10, snr/20)));
-    chunk->AddVec(scale_factor, noise);
+    chunk->Row(i).AddVec(scale_factor, noise);
   }
 }
 
 
-} // end of namespace nnet3
 } // end of namespace kaldi

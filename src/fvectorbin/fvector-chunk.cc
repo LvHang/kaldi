@@ -7,18 +7,19 @@ namespace kaldi {
 //The length of selected utterance is bigger than chunk_size, which guarantees
 //we can get a complete noise chunk. At the same time, the startpoint is randomly
 //selected from [0, len(utt)-chunk_size].
-RandomSelectTwoNoiseUtt(const std::vector<std::pair<std::string, float>>& utt2dur_list,
-                        const int32& utt2dur_len,
-                        const int32& chunk_size,
-                        std::vector<std::pair<std::string, float>>* output) {
+void RandomSelectTwoNoiseUtt(const std::vector<std::pair<std::string, float>>& utt2dur_list,
+                             const int32& utt2dur_len,
+                             const int32& chunk_size,
+                             std::vector<std::pair<std::string, float>>* output) {
   for(int32 index = 0; index < 2; ++index) {
+    int32 r_index = -1;
     do {
       // r_index indicate the random index of utt2dur_list
-      int32 r_index = RandInt(0, utt2dur_len-1);
-    } while (utt2dur_list[r_index][1] > chunk_size);
+      r_index = RandInt(0, utt2dur_len-1);
+    } while (utt2dur_list[r_index].second > chunk_size);
     // random number in [0, utt2dur]
-    float start_point = RandInt(0, (int)utt2dur_list[r_index][1]*100) * 1.0 / 100;
-    output.push_back(std::make_pair(utt2dur_list[r_index][0], start_point));
+    float start_point = RandInt(0, (int)(utt2dur_list[r_index].second)*100) * 1.0 / 100;
+    output->push_back(std::make_pair(utt2dur_list[r_index].first, start_point));
   }
   KALDI_ASSERT(output->size() == 2);
 }
@@ -53,7 +54,7 @@ int main(int argc, char *argv[]) {
                 "of two adjacent chunks in the same utterance.");
     po.Register("min-duration", &min_duration, "Minimum duration of segments "
                 "to process (in seconds).");
-    po.Register("srand", &srand_seed, "Seed for random number generator.")
+    po.Register("srand", &srand_seed, "Seed for random number generator.");
 
     po.Read(argc, argv);
 
@@ -77,10 +78,9 @@ int main(int argc, char *argv[]) {
 
     //Read the utt2dur file
     //the vector--utt2dur is used to randomly select the noise chunk.
-    std::vector<std::pair<std::string, float>> utt2dur 
+    std::vector<std::pair<std::string, float>> utt2dur;
     std::string line;
     while (std::getline(ki.Stream(), line)) {
-      num_lines++;
       std::vector<std::string> split_line;
       // Split the line by space or tab and check the number of fields in each
       // line. There must be 2 fields--segment utt_id and duration
@@ -100,7 +100,7 @@ int main(int argc, char *argv[]) {
       utt2dur.push_back(std::make_pair(utt, duration));
     }
     //random number in [0, utt2dur_len), so we get variable "utt2dur_len"
-    utt2dur_len = utt2dur_list.size();
+    int32 utt2dur_len = utt2dur.size();
 
     // Start to chunk the data, compose 1 source chunk and 2 noise chunks into
     // a matrix.
@@ -134,15 +134,15 @@ int main(int argc, char *argv[]) {
       }
 
       SubVector<BaseFloat> waveform(wave_data.Data(), this_chan);
-      //e.g. A "waveform" is 285ms, chunk_size is 120ms, time_shift is 70ms. At last, the chunks
+      //e.g. A "waveform" is 285ms, chunk_size is 120ms, shift_time is 70ms. At last, the chunks
       //will be 0-120ms, 70-190ms, 140-260ms. So num_chunk = 3
-      int32 num_chunk = (int)((waveform.Dim() / wav_data.SampFreq() - chunk_size ) / time_shift) + 1;
-      int32 dim = wav_data.SampFreq() * chunk_size / 1000;
+      int32 num_chunk = (int)((waveform.Dim() / wave_data.SampFreq() - chunk_size ) / shift_time) + 1;
+      int32 dim = wave_data.SampFreq() * chunk_size / 1000;
       try {
-        for (index = 0; index < num_chunk; ++index) {
+        for (int32 index = 0; index < num_chunk; ++index) {
           Matrix<BaseFloat> features(3, dim);
-          int32 source_start = wav_data.SampFreq() * (index * time_shift);
-          features.CopyRowFromVec(SubVector(waveform, source_start, dim), 0);
+          int32 source_start = wave_data.SampFreq() * (index * shift_time);
+          features.CopyRowFromVec(SubVector<BaseFloat>(waveform, source_start, dim), 0);
           //1. Generate 2 random number form [0, utt2dur_len)
           //2. From vector utt2dur, get the 2 pairs
           //3. Generate 2 random "start point" number from [0, utt2dur[x][1])
@@ -151,21 +151,21 @@ int main(int argc, char *argv[]) {
           //pair, its content is <uttid, start_point>
           std::vector<std::pair<std::string, float>> two_random_uttid;
           RandomSelectTwoNoiseUtt(utt2dur, utt2dur_len, chunk_size/1000, 
-                                  *two_random_uttid);
+                                  &two_random_uttid);
           //4. According to the utt2dur[x][0]--utt_id and startpoint form RandomAccessTable
           //   read noise chunk.
           //5. The features matrix has 3 lines: source, nosie1, noise2.
-          const WaveData &noise_wav1 = noise_reader.Value(two_random_uttid[0][0]);
-          KALDI_ASSERT(wav_data.SampFreq() == noise_wav1.SampFreq());
+          const WaveData &noise_wav1 = noise_reader.Value(two_random_uttid[0].first);
+          KALDI_ASSERT(wave_data.SampFreq() == noise_wav1.SampFreq());
           SubVector<BaseFloat> noise1(noise_wav1.Data(), 0);
-          features.CopyRowFromVec(SubVector(noise1, two_random_uttid[0][1], dim), 1);
+          features.CopyRowFromVec(SubVector<BaseFloat>(noise1, two_random_uttid[0].second, dim), 1);
           
-          const WaveData &noise_wav2 = noise_reader.Value(two_random_uttid[1][0]);
-          KALDI_ASSERT(wav_data.SampFreq() == noise_wav2.SampFreq());
+          const WaveData &noise_wav2 = noise_reader.Value(two_random_uttid[1].first);
+          KALDI_ASSERT(wave_data.SampFreq() == noise_wav2.SampFreq());
           SubVector<BaseFloat> noise2(noise_wav2.Data(), 0);
-          features.CopyRowFromVec(SubVector(noise2, two_random_uttid[1][1], dim), 1);
+          features.CopyRowFromVec(SubVector<BaseFloat>(noise2, two_random_uttid[1].second, dim), 1);
 
-          ostringstream utt_id_new;
+          std::ostringstream utt_id_new;
           utt_id_new << utt << '_' << index;
           kaldi_writer.Write(utt_id_new.str(), features);
         }

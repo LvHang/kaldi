@@ -12,13 +12,12 @@
 
 #include "feat/resample.h"
 #include "matrix/matrix-functions.h"
-#include "cudamatrix/cu-matrix.h"
 
 namespace kaldi {
 
 // options class for distorting signals in egs
 struct FvectorPerturbOptions {
-  int32 sample_frequency;
+  BaseFloat sample_frequency;
   BaseFloat expected_chunk_length;
   BaseFloat max_speed_perturb_rate;
   BaseFloat max_volume_variance;
@@ -29,16 +28,17 @@ struct FvectorPerturbOptions {
   bool time_shift;
   bool add_noise;
 
-  XvectorPerturbOptions(): sample_frequency(8000),
+  FvectorPerturbOptions(): sample_frequency(8000),
                            expected_chunk_length(100),
                            max_speed_perturb_rate(0.1),
                            max_volume_variance(0.03),
                            max_snr(-5),
                            min_snr(20),
-                           volume_perturbaton(true),
+                           volume_perturbation(true),
                            speed_perturbation(true),
                            time_shift(true),
                            add_noise(true) { }
+
   void Register(OptionsItf *opts) {
     opts->Register("sample-frequency", &sample_frequency, "The sample frequency "
                    "of the wav signal.");
@@ -53,7 +53,7 @@ struct FvectorPerturbOptions {
                    "with expected_chunk_length, default=0.1.");
     opts->Register("max-volume-variance", &max_volume_variance, "The variation in "
                    "volume will vary form -max-volume-variance to max-volume-variance randomly."
-                   "default=0.03.")
+                   "default=0.03.");
     opts->Register("max-snr",&max_snr,"Specify a upperbound Signal to Noise Ratio. We will scale the noise according "
                    "to the original signal and SNR. Normally, it's a non-zero number between -30 and 30"
                    "default=-5.");
@@ -81,7 +81,7 @@ struct FvectorPerturbOptions {
  */
 class FvectorPerturb {
  public:
-  PerturbXvector(FvectorPerturbOptions opts) { opts_ = opts; }
+  FvectorPerturb(FvectorPerturbOptions opts) { opts_ = opts; }
   void ApplyPerturbation(const MatrixBase<BaseFloat>& input_chunk,
                          Matrix<BaseFloat>* perturbed_chunk);
 
@@ -92,7 +92,7 @@ class FvectorPerturb {
   // Then do time axis strench. As speed factor is different, so we deal with
   // each vector sepeartely. The dim of output_vector is bigger than
   // expected_chunk_length(ms)
-  void SpeedPerturbation(MatrixBase<BaseFloat>& input_vector,
+  void SpeedPerturbation(VectorBase<BaseFloat>& input_vector,
                          BaseFloat samp_freq,
                          BaseFloat speed_factor,
                          VectorBase<BaseFloat>* output_vector);

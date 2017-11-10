@@ -57,7 +57,7 @@ int main(int argc, char *argv[]) {
           num_egs_written = 0;
     for (; feature_reader.Done(); feature_reader.Next(), num_read++) {
       std::string key = feature_reader.Key();
-      const GeneralMatrix &feats = feature_reader.Value();
+      const Matrix<BaseFloat> &feats = feature_reader.Value();
       //Please take care. Here, the 'feats' is a 2-lines matrix which is generated
       //by fvector-add-noise.cc. The 2-lines matrix represents two perturbed 
       //vectors(e.g 100ms wavform) which come from the same source signal.
@@ -82,7 +82,7 @@ int main(int argc, char *argv[]) {
       if (compress) {
         eg.Compress();
       }
-      example_writers[pair->output_archive_id]->Write(pair->pair_name, eg);
+      example_writer.Write(key, eg);
       num_egs_written += 1;
     }
     KALDI_LOG << "Finished generating examples, "
