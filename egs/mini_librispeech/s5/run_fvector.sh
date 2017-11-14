@@ -58,29 +58,8 @@ if [ $stage -le 2 ]; then
   cat data/noise/utt2dur | awk '{print $1 $2-0.2}' > data/noise/utt2dur_fix
 fi
 
-#stage3: get the (120ms) chunks from wav.scp and noise.scp. And compose 1 source
-# chunk and 2 noise chunks into a matrix.
-if [ $stage -le 3 ]; then
-  fvector-chunk --chunk-size=120 scp:data/train_clean_5/wav.scp scp:data/noise/wav.scp \
-    data/noise/utt2dur_fix ark,scp:data/train_clean_5/chunks.ark,data/train_clean_5/chunks.scp
-fi
+#generate fvector egs and train model.
+local/fvector/run_fvector.sh --data data/train_clean_5 --noise-data data/noise \
+  --egs-dir exp/fvector/egs --fvector-dir exp/fvector
 
-#stage4: Deal with the chunk one-by-one, add the noise.
-if [ $stage -le 4 ]; then
-  fvector-add-noise scp:data/train_clean_5/chunks.scp \
-    scp,ark:data/train_clean_5/perturbed_chunks.scp,data/train_clean_5/perturbed_chunks.ark
-fi
 
-#stage5: convert the chunk data into Nnet3eg
-if [ $stage -le 5 ]; then
-  #It will be implement in a bash script like steps/nnet3/get_egs.sh
-  #The core of the script is following
-  fvector-get-egs scp:data/train_clean_5/perturbed_chunks.scp ark:egs.ark
-fi
-
-if [ $stage -le 6 ]; then
-  #The other step is simliar with xvector. 
-  #Use nnet3-shuffle-egs | nnet3-merge-egs to combine the separate Nnet3eg into
-  #minibatch
-  #And Train the plda nnetwork.
-fi
