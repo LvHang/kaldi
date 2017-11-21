@@ -8,6 +8,12 @@ void FvectorPerturb::ApplyPerturbation(const MatrixBase<BaseFloat>& input_chunk,
   // Assume the sample_frequency=8kHz, the original length is 120ms.
   // It will be a (4, 960) matrix.
   Matrix<BaseFloat> original_dim_matrix(input_chunk);
+  // Firstly, we add additive noise with probability.
+  AddNoise(opts_.add_noise, &original_dim_matrix);
+  // we do Resize() here, because Resize() belongs to Matrix<> rather than MatrixBase<>
+  original_dim_matrix.Resize(2, original_dim_matrix.NumCols(), kCopyData);
+  KALDI_ASSERT(original_dim_matrix.NumRows() == 2);
+  // After AddNoise(), the shape of original_dim_matrix is (2, original_dim).
   if (opts_.volume_perturbation) {
     VolumePerturbation(&original_dim_matrix);
   }
@@ -56,17 +62,14 @@ void FvectorPerturb::ApplyPerturbation(const MatrixBase<BaseFloat>& input_chunk,
                                                                 0, expected_dim_matrix.NumCols()));
     }
   }
-  // Now we operate the "expected_dim_matrix"
-  if (opts_.add_noise) {
-    AddNoise(&expected_dim_matrix);
-  }
+  // Now we operate the "expected_dim_matrix"  
   perturbed_chunk->Resize(2, expected_dim_matrix.NumCols());
   MatrixIndexT indices[2] = {0, 1};
   perturbed_chunk->CopyRows(expected_dim_matrix, indices);
 }
 
 void FvectorPerturb::VolumePerturbation(MatrixBase<BaseFloat>* chunk) {
-  //1. Randomly generate 4 number from (1-max-volume-variance, 1+max-volume-variance)
+  //1. Randomly generate 2 number from (1-max-volume-variance, 1+max-volume-variance)
   std::vector<BaseFloat> volume_factors;
   for (MatrixIndexT i = 0; i < chunk->NumRows(); ++i) {
     BaseFloat factor = static_cast<BaseFloat>(
@@ -126,21 +129,25 @@ void FvectorPerturb::TimeShift(VectorBase<BaseFloat>& input_vector,
   output_vector->CopyFromVec(input_vector.Range(start_point, output_vector->Dim()));
 }
 
-void FvectorPerturb::AddNoise(MatrixBase<BaseFloat>* chunk) {
+void FvectorPerturb::AddNoise(BaseFloat probability_threshold, 
+                              MatrixBase<BaseFloat>* chunk) {
   //Now, the dim of each line is expected_chunk_length * sample_frequency
   //e.g 100ms * 8000Hz = 800.
   //1. generate 2 SNR from (min-snr, max-snr)
-  //2. add N1(line3) to S1(line1) with snr1
-  //   add N2(line4) to S2(line2) with snr2
+  //2. add N1(line3) to S1(line1) with snr1 with probability
+  //   add N2(line4) to S2(line2) with snr2 with probability
   for (MatrixIndexT i = 0; i < 2; i++) {
-    Vector<BaseFloat> source(chunk->Row(i));
-    Vector<BaseFloat> noise(chunk->Row(i+2));
-    BaseFloat source_energy = VecVec(source, source);
-    BaseFloat noise_energy = VecVec(noise, noise);
-    // The smaller the value, the greater the snr
-    int32 snr = RandInt(opts_.max_snr, opts_.min_snr);
-    BaseFloat scale_factor = sqrt(source_energy/ noise_energy / (pow(10, snr/20)));
-    chunk->Row(i).AddVec(scale_factor, noise);
+    BaseFloat  probability = static_cast<BaseFloat>(RandInt(0, 10000) / 100.0);
+    if (probability <= probability_threshold) {
+      Vector<BaseFloat> source(chunk->Row(i));
+      Vector<BaseFloat> noise(chunk->Row(i+2));
+      BaseFloat source_energy = VecVec(source, source);
+      BaseFloat noise_energy = VecVec(noise, noise);
+      // The smaller the value, the greater the snr
+      int32 snr = RandInt(opts_.max_snr, opts_.min_snr);
+      BaseFloat scale_factor = sqrt(source_energy/ noise_energy / (pow(10, snr/20)));
+      chunk->Row(i).AddVec(scale_factor, noise);
+    }
   }
 }
 

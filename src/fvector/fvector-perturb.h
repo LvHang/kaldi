@@ -91,7 +91,7 @@ class FvectorPerturb {
   void ApplyPerturbation(const MatrixBase<BaseFloat>& input_chunk,
                          Matrix<BaseFloat>* perturbed_chunk);
 
-  // Randomly Generate 4 scale number and scale each line respectively
+  // Randomly Generate 2 scale number and scale each line respectively
   void VolumePerturbation(MatrixBase<BaseFloat>* chunk);
 
   // Use ArbitraryResample. For each line, randomly generate a speed factor. 
@@ -107,12 +107,15 @@ class FvectorPerturb {
   void TimeShift(VectorBase<BaseFloat>& input_vector,
                  VectorBase<BaseFloat>* output_vector);
 
-  // The input is a matrix with four lines after three kinds of perturbation.
-  // It is (S1, S2, N1, N2). Each line is expected_chunk_length(ms)(e.g. 800 dims)
-  // add N1 to S1, add N2 to S2 with random snr.
+  // The input is a matrix contains four consecutive rows.
+  // It is (S1, S2, N1, N2). Each line is original_chunk_length(ms)(e.g. 960 dims = 120ms)
+  // add N1 to S1, add N2 to S2 with random snr. with probability (probability_threshold).
   // After that, only the first two lines is meaningful, which represents two 
   // perturbed signals from the same source wavform signal.
-  void AddNoise(MatrixBase<BaseFloat>* chunk);
+  // After use this function, maybe you need to resize the output.
+  // (Notice: Resize() belongs to Matrix<> rather than MatrixBase<>)
+  void AddNoise(BaseFloat probability_threshold,
+                MatrixBase<BaseFloat>* chunk);
 
  private:
   FvectorPerturbOptions opts_;
