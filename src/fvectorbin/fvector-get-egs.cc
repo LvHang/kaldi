@@ -35,10 +35,17 @@ int main(int argc, char *argv[]) {
         "fvector-get-egs scp:perturbed_chunks.scp ark:egs.ark";
 
     bool compress = true;
+    BaseFloat frame_length_ms = 25; // in milliseconds
+    BaseFloat frame_shift_ms = 10; // in milliseconds
+    BaseFloat samp_freq;
 
     ParseOptions po(usage);
     po.Register("compress", &compress, "If true, write egs in "
                 "compressed format.");
+    po.Register("frame-length", &frame_length_ms, "Frame length in milliseconds");
+    po.Register("frame-shift", &frame_shift_ms, "Frame shift in milliseconds");
+    po.Register("sample-frequency", &samp_freq, "Waveform data sample frequency ("
+                "must match the waveform file, if specified there)");
 
     po.Read(argc, argv);
 
@@ -62,10 +69,22 @@ int main(int argc, char *argv[]) {
       //by fvector-add-noise.cc. The 2-lines matrix represents two perturbed 
       //vectors(e.g 100ms wavform) which come from the same source signal.
       //chunk1 and chunk2 corresponds to one line respectively.
-      SubMatrix<BaseFloat> chunk1(feats, 0, 1, 0, feats.NumCols()),
-                           chunk2(feats, 1, 1, 0, feats.NumCols());
-      NnetIo nnet_io1 = NnetIo("input", 0, chunk1),
-             nnet_io2 = NnetIo("input", 0, chunk2);
+      SubVector<BaseFloat> chunk1(feats, 0),
+                           chunk2(feats, 1);
+      //According to frame_length and frame_shift, cut the chunk into few pieces
+      //so that it is similiar with normal feature extract procedure.
+      int num_rows = ((int)((chunk1.Dim() / samp_freq - frame_length_ms) / 
+                            frame_shift_ms) + 1);
+      int num_cols = (int)(samp_freq * frame_length_ms);
+      Matrix<BaseFloat> chunk1_matrix(num_rows, num_cols),
+                        chunk2_matrix(num_rows, num_cols);
+      for (MatrixIndexT i = 0; i < num_rows; i++) {
+        chunk1_matrix.Row(i).CopyFromVec(chunk1.Range(i*num_cols, num_cols));
+        chunk2_matrix.Row(i).CopyFromVec(chunk2.Range(i*num_cols, num_cols));
+      }
+      //generate the NnetIo
+      NnetIo nnet_io1 = NnetIo("input", 0, chunk1_matrix),
+             nnet_io2 = NnetIo("input", 0, chunk2_matrix);
       //modify the n index, so that in a mini-batch Nnet3Example, the adjacent
       //two NnetIos come from the same source signal.
       for (std::vector<Index>::iterator indx_it = nnet_io1.indexes.begin();
