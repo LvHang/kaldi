@@ -26,7 +26,7 @@ struct FvectorPerturbOptions {
   bool volume_perturbation;
   bool speed_perturbation;
   bool time_shift;
-  bool add_noise;
+  BaseFloat add_noise;
 
   FvectorPerturbOptions(): sample_frequency(8000),
                            expected_chunk_length(100),
@@ -37,45 +37,51 @@ struct FvectorPerturbOptions {
                            volume_perturbation(true),
                            speed_perturbation(true),
                            time_shift(true),
-                           add_noise(true) { }
+                           add_noise(0.85) { }
 
   void Register(OptionsItf *opts) {
     opts->Register("sample-frequency", &sample_frequency, "The sample frequency "
-                   "of the wav signal.");
+                   "of the wav signal. (float, default = 8000)");
     opts->Register("expected-chunk-length", &expected_chunk_length, "It show the "
                    "length of chunk you expected. e.g. 100ms. That means the length "
                    "of output will correspond to 100ms. At the same time, it will "
                    "affect the speed_perturb_rate, the speed_perturb_rate factor will "
                    "in the range of min{expected-chunk-length/original-length, "
-                   "max-speed-perturb-rate}. default=100 ms.");
+                   "max-speed-perturb-rate}. (float, default = 100 ms)");
     opts->Register("max-speed-perturb-rate", &max_speed_perturb_rate,
                    "Max speed perturbation applied on matrix. It will work together "
-                   "with expected_chunk_length, default=0.1.");
+                   "with expected_chunk_length. E.g. 0.1 means we will generate "
+                   "speed_factor randomly from range (1-a, 1+a), where a="
+                   "min{original_length/expected_length-1, 0.1}. (float, default = 0.1)");
     opts->Register("max-volume-variance", &max_volume_variance, "The variation in "
-                   "volume will vary form -max-volume-variance to max-volume-variance randomly."
-                   "default=0.03.");
+                   "volume will vary form 1-max-volume-variance to 1+max-volume-variance "
+                   "randomly. (float, default = 0.03)");
     opts->Register("max-snr",&max_snr,"Specify a upperbound Signal to Noise Ratio. We will scale the noise according "
-                   "to the original signal and SNR. Normally, it's a non-zero number between -30 and 30"
-                   "default=-5.");
+                   "to the original signal and SNR. Normally, it's a non-zero number between -30 and 30."
+                   "(float, default = -5)");
     opts->Register("min-snr",&min_snr,"Specify a lowerbound Signal to Noise Ratio. We will scale the noise according "
-                   "to the original signal and SNR. Normally, it's a non-zero number between -30 and 30"
-                   "default=10");
-    opts->Register("volume-perturbation", &volume_perturbation, "If ture, we will "
-                   "conduct variations in volume.");
-    opts->Register("speed-perturbation", &speed_perturbation, "If ture, we will "
-                   "conduct variations in speed.");
-    opts->Register("time-shift", &time_shift, "If ture, we will "
-                   "conduct time shift. That means randomly select the start point and "
+                   "to the original signal and SNR. Normally, it's a non-zero number between -30 and 30."
+                   "(float, default = 10)");
+    opts->Register("volume-perturbation", &volume_perturbation, "If true, we will "
+                   "conduct variations in volume. (bool, default = true)");
+    opts->Register("speed-perturbation", &speed_perturbation, "If true, we will "
+                   "conduct variations in speed. (bool, default = true)");
+    opts->Register("time-shift", &time_shift, "If true, we will "
+                   "conduct time shift. That means randomly select the start point from "
+                   "range [0, input.NumCols() - expected_chunk_length], and then "
                    "get the successive 'expected_chunk_length' data. Otherwise, we get "
-                   "the data from the head.");
-    opts->Register("add-noise", &add_noise, "If ture, we will "
-                   "conduct add additive noise to source chunk.");
+                   "the data from the head. (bool, default = true)");
+    opts->Register("add-noise", &add_noise, "Add additive noise to source chunk with "
+                   "probability. E.g. 0.85 means we add noise with 85 percent probability, "
+                   "and remain with 15 percent probability. (float, default = 0.85)");
   }
 };
 
-/* This class is used to do 4 kinds of perturbation operation to fvector.
+/* This class is used to do (0-4) kinds of perturbation operation to fvector.
+ * According to the FvectorPerturbOptions, we choose do or not.
  * The input always is a Matrix which contains four lines(S1, S2, N1, N2)[S1=S2]
- * Then we will call different perturbation methods.
+ * Then we will call different perturbation methods. (For details, see the comments
+ * of FvectorPerturbOption.)
  * For the details about the four kinds of perturbation operation, please see
  * the document in fvector-perturb.cc.
  */
@@ -89,8 +95,8 @@ class FvectorPerturb {
   void VolumePerturbation(MatrixBase<BaseFloat>* chunk);
 
   // Use ArbitraryResample. For each line, randomly generate a speed factor. 
-  // Then do time axis strench. As speed factor is different, so we deal with
-  // each vector sepeartely. The dim of output_vector is bigger than
+  // Then do time axis stretch. As speed factor is different, so we deal with
+  // each vector separately. The dim of output_vector is bigger than
   // expected_chunk_length(ms)
   void SpeedPerturbation(VectorBase<BaseFloat>& input_vector,
                          BaseFloat samp_freq,

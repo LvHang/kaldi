@@ -6,9 +6,10 @@ int main(int argc, char *argv[]) {
   try {
     using namespace kaldi;
     const char *usage =
-        "Perturb the chunk data. Each input chunk is a four-lines matrix(S1, S2, N1, N2).\n"
-        "After use 4 kinds of perturbation opertation, each output chunk is a 2-lines matrix.\n"
-        "The two lines come from the same source wavform signal, but now they are different.\n"
+        "Perturb the chunk data. Each input chunk is a four consecutive rows matrix(S1, S2, N1, N2).\n"
+        "According to the setup, use (0-4) kinds of perturbation opertation, and then each output chunk \n"
+        "is a 2 consecutive rows of output matrix.\n"
+        "The two rows come from the same source wavform signal, but now they are different.\n"
         "Usage:  fvector-add-noise [options...] <chunk-rspecifier> <perturbed-wspecifier>\n";
 
     // construct all the global objects
