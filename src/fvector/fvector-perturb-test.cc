@@ -27,11 +27,19 @@ static void UnitTestSpeedPerturb() {
   output.Resize(static_cast<MatrixIndexT>(ceil(input.Dim()/speed_factor)));
   perturb.SpeedPerturbation(input, sample_freq, speed_factor, &output);
   {
-    std::ofstream os("./test_data/test.wav.speedperturbed", std::ios::out);
+    std::ofstream os("./test_data/test_speedperturbed.wav.txt", std::ios::out);
     output.Write(os, false);
   }
   std::cout << "With fvector class, The dim of input is: " << input.Dim() << std::endl;
   std::cout << "With fvector class, The dim of output is: " << output.Dim() << std::endl;
+  // Write the perturbed data into wav format
+  {
+    Matrix<BaseFloat> output_matrix(1, output.Dim());
+    output_matrix.CopyRowFromVec(output, 0);
+    WaveData perturbed_wave(sample_freq, output_matrix);
+    std::ofstream os("./test_data/test_speedperturbed.wav", std::ios::out);
+    perturbed_wave.Write(os);
+  }
   // print the wav data which is dealed by sox. 
   // Command: sox -t wav test.wav -t wav test_speed12.wav speed 1.2
   Vector<BaseFloat> sox_input;
@@ -45,7 +53,7 @@ static void UnitTestSpeedPerturb() {
     sox_input.Resize(data.NumCols());
     sox_input.CopyFromVec(data.Row(0));
     sox_sample_freq = wave.SampFreq();
-    std::ofstream os("./test_data/test.wav.sox", std::ios::out);
+    std::ofstream os("./test_data/test_sox.wav.txt", std::ios::out);
     sox_input.Write(os, false);
   }
   KALDI_ASSERT(sample_freq == sox_sample_freq);
