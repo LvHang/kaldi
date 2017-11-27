@@ -36,7 +36,7 @@ int main(int argc, char *argv[]) {
         "length fragments from noise-list. Then we the store the 'source' chunk and\n"
         "'noise' chunks into the corresponding matrix separately."
         "Usage:  fvector-chunk [options...] <wav-rspecifier> <noise-rspecifier>"
-        "<utt2dur-rxfilename> <feats-wspecifier> <noises-wspecifier>\n";
+        "<utt2dur-rxfilename> <feats-wspecifier> <noise1-wspecifier> <noise2-wspecifier>\n";
 
     // construct all the global objects
     ParseOptions po(usage);
@@ -63,7 +63,7 @@ int main(int argc, char *argv[]) {
     
     po.Read(argc, argv);
 
-    if (po.NumArgs() != 4) {
+    if (po.NumArgs() != 6) {
       po.PrintUsage();
       exit(1);
     }
@@ -74,14 +74,16 @@ int main(int argc, char *argv[]) {
     std::string noise_rspecifier = po.GetArg(2);
     std::string utt2dur_rxfilename = po.GetArg(3);
     std::string output_feature_wspecifier = po.GetArg(4);
-    std::string output_noise_wspecifier = po.GetArg(5);
+    std::string output_noise1_wspecifier = po.GetArg(5);
+    std::string output_noise2_wspecifier = po.GetArg(6);
 
 
     SequentialTableReader<WaveHolder> reader(wav_rspecifier);
     RandomAccessTableReader<WaveHolder> noise_reader(noise_rspecifier);
     Input ki(utt2dur_rxfilename);
     BaseFloatMatrixWriter feature_writer;  // typedef to TableWriter<something>.
-    BaseFloatMatrixWriter noise_writer;
+    BaseFloatMatrixWriter noise1_writer;
+    BaseFloatMatrixWriter noise2_writer;
 
     //Read the utt2dur file
     //the vector--utt2dur is used to randomly select the noise chunk.
@@ -181,13 +183,11 @@ int main(int argc, char *argv[]) {
           
           // when "counter == block_size", store the matrices.
           if (counter == block_size) {
-            std::ostringstream utt_id_new, noise_block1_id, noise_block2_id;
+            std::ostringstream utt_id_new;
             utt_id_new << utt << '_' << index;
-            noise_block1_id << utt << '_' << index << "_noise1";
-            noise_block2_id << utt << '_' << index << "_noise2";
             feature_writer.Write(utt_id_new.str(), feature_block);
-            noise_writer.Write(noise_block1_id.str(), noise_block1);
-            noise_writer.Write(noise_block2_id.str(), noise_block2);
+            noise1_writer.Write(utt_id_new.str(), noise_block1);
+            noise2_writer.Write(utt_id_new.str(), noise_block2);
             counter = 0;
           }
         }
