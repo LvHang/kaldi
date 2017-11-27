@@ -33,11 +33,10 @@ int main(int argc, char *argv[]) {
     const char *usage =
         "Get the data chunks. We sequentially read the wav files. And cut them\n"
         "into 'chunk_size' length fragment. And we randomly select two 'chunk_size'\n"
-        "length fragments from noise-list. Then we compose the three vectors into\n"
-        "a matrix, which we call it 'chunk'. So each item in the output file \n"
-        "is a matrix which has 3 lines.(S1, N1, N2).\n"
+        "length fragments from noise-list. Then we the store the 'source' chunk and\n"
+        "'noise' chunks into the corresponding matrix separately."
         "Usage:  fvector-chunk [options...] <wav-rspecifier> <noise-rspecifier>"
-        "<utt2dur-rxfilename> <feats-wspecifier>\n";
+        "<utt2dur-rxfilename> <feats-wspecifier> <noises-wspecifier>\n";
 
     // construct all the global objects
     ParseOptions po(usage);
@@ -46,6 +45,8 @@ int main(int argc, char *argv[]) {
     int32 shift_time = 60;
     BaseFloat min_duration = 0.0;
     int32 srand_seed = 1;
+    int32 block_size = 32;
+    BaseFloat samp_freq = 8000;
 
     po.Register("channel", &channel, "Channel to extract (-1 -> expect mono, "
                 "0 -> left, 1 -> right)");
@@ -55,7 +56,11 @@ int main(int argc, char *argv[]) {
     po.Register("min-duration", &min_duration, "Minimum duration of segments "
                 "to process (in seconds).");
     po.Register("srand", &srand_seed, "Seed for random number generator.");
-
+    po.Register("block-size",&block_size, "Specify the number of lines of feature "
+                "block; the number of lines of noise block will be twice.");
+    po.Register("sample-frequency", &samp_freq, "Specify the sample frequency. "
+                "(default=8000)");
+    
     po.Read(argc, argv);
 
     if (po.NumArgs() != 4) {
@@ -68,13 +73,15 @@ int main(int argc, char *argv[]) {
     std::string wav_rspecifier = po.GetArg(1);
     std::string noise_rspecifier = po.GetArg(2);
     std::string utt2dur_rxfilename = po.GetArg(3);
-    std::string output_wspecifier = po.GetArg(4);
+    std::string output_feature_wspecifier = po.GetArg(4);
+    std::string output_noise_wspecifier = po.GetArg(5);
 
 
     SequentialTableReader<WaveHolder> reader(wav_rspecifier);
     RandomAccessTableReader<WaveHolder> noise_reader(noise_rspecifier);
     Input ki(utt2dur_rxfilename);
-    BaseFloatMatrixWriter kaldi_writer;  // typedef to TableWriter<something>.
+    BaseFloatMatrixWriter feature_writer;  // typedef to TableWriter<something>.
+    BaseFloatMatrixWriter noise_writer;
 
     //Read the utt2dur file
     //the vector--utt2dur is used to randomly select the noise chunk.
@@ -102,9 +109,16 @@ int main(int argc, char *argv[]) {
     //random number in [0, utt2dur_len), so we get variable "utt2dur_len"
     int32 utt2dur_len = utt2dur.size();
 
-    // Start to chunk the data, compose 1 source chunk and 2 noise chunks into
-    // a matrix.
+    // Start to chunk the data, each source chunk and 2 corresponding noise 
+    // chunks were store into corresping block matrix. When counter == block_size,
+    // write one source block and two noise blocks.
     int32 num_utts = 0, num_success = 0;
+    int32 counter = 0;
+    int32 dim = static_cast<int32>(samp_freq * chunk_size / 1000);
+    Matrix<BaseFloat> feature_block(block_size, dim),
+                      noise_block1(block_size, dim),
+                      noise_block2(block_size, dim);
+
     for (; !reader.Done(); reader.Next()) {
       num_utts++;
       std::string utt = reader.Key();
@@ -133,16 +147,15 @@ int main(int argc, char *argv[]) {
         }
       }
 
+      KALDI_ASSERT(wave_data.SampFreq() == samp_freq);
       SubVector<BaseFloat> waveform(wave_data.Data(), this_chan);
       //e.g. A "waveform" is 285ms, chunk_size is 120ms, shift_time is 70ms. At last, the chunks
       //will be 0-120ms, 70-190ms, 140-260ms. So num_chunk = 3
       int32 num_chunk = (int)((waveform.Dim() / wave_data.SampFreq() - chunk_size ) / shift_time) + 1;
-      int32 dim = wave_data.SampFreq() * chunk_size / 1000;
       try {
         for (int32 index = 0; index < num_chunk; ++index) {
-          Matrix<BaseFloat> features(3, dim);
           int32 source_start = wave_data.SampFreq() * (index * shift_time);
-          features.CopyRowFromVec(SubVector<BaseFloat>(waveform, source_start, dim), 0);
+          feature_block.CopyRowFromVec(SubVector<BaseFloat>(waveform, source_start, dim), counter);
           //1. Generate 2 random number form [0, utt2dur_len)
           //2. From vector utt2dur, get the 2 pairs
           //3. Generate 2 random "start point" number from [0, utt2dur[x][1])
@@ -158,16 +171,25 @@ int main(int argc, char *argv[]) {
           const WaveData &noise_wav1 = noise_reader.Value(two_random_uttid[0].first);
           KALDI_ASSERT(wave_data.SampFreq() == noise_wav1.SampFreq());
           SubVector<BaseFloat> noise1(noise_wav1.Data(), 0);
-          features.CopyRowFromVec(SubVector<BaseFloat>(noise1, two_random_uttid[0].second, dim), 1);
+          noise_block1.CopyRowFromVec(SubVector<BaseFloat>(noise1, two_random_uttid[0].second, dim), counter);
           
           const WaveData &noise_wav2 = noise_reader.Value(two_random_uttid[1].first);
           KALDI_ASSERT(wave_data.SampFreq() == noise_wav2.SampFreq());
           SubVector<BaseFloat> noise2(noise_wav2.Data(), 0);
-          features.CopyRowFromVec(SubVector<BaseFloat>(noise2, two_random_uttid[1].second, dim), 1);
-
-          std::ostringstream utt_id_new;
-          utt_id_new << utt << '_' << index;
-          kaldi_writer.Write(utt_id_new.str(), features);
+          noise_block2.CopyRowFromVec(SubVector<BaseFloat>(noise2, two_random_uttid[1].second, dim), counter);
+          counter++;
+          
+          // when "counter == block_size", store the matrices.
+          if (counter == block_size) {
+            std::ostringstream utt_id_new, noise_block1_id, noise_block2_id;
+            utt_id_new << utt << '_' << index;
+            noise_block1_id << utt << '_' << index << "_noise1";
+            noise_block2_id << utt << '_' << index << "_noise2";
+            feature_writer.Write(utt_id_new.str(), feature_block);
+            noise_writer.Write(noise_block1_id.str(), noise_block1);
+            noise_writer.Write(noise_block2_id.str(), noise_block2);
+            counter = 0;
+          }
         }
       } catch (...) {
         KALDI_WARN << "Failed to compute features for utterance "
