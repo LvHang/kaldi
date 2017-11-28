@@ -121,5 +121,54 @@ class FvectorPerturb {
   FvectorPerturbOptions opts_;
 };
 
+
+/* This class is used to do (0-4) kinds of perturbation operation to fvector.
+ * According to the FvectorPerturbOptions, we choose do or not. 
+ * It is block version code that means it will process a matrix each time.
+ * Different from class FvectorPerturb, the class will process its private members
+ * (perturbed1, perturbed2, noise1 and noise2) to conducte perturbation operations.
+ * We will call different perturbation methods. (For details, see the comments
+ * of FvectorPerturbOption.)
+ * For the details about the four kinds of perturbation operation, please see
+ * the document in fvector-perturb.cc.
+ */
+class FvectorPerturbBlock {
+ public:
+  FvectorPerturbBlock(FvectorPerturbOptions opts, 
+                      const MatrixBase<BaseFloat> &source,
+                      const MatrixBase<BaseFloat> &noise1,
+                      const MatrixBase<BaseFloat> &noise2) : opts_(opts),
+    perturbed1(source), perturbed2(source), noise1(noise1), noise2(noise2) {}
+
+  // The interface to apply different perturbation opertaions. Firstly, the
+  // function will conduct different perturbation operations. And then
+  // it will compose the final matrices--perturbed1, perturbed2 together.
+  void ApplyPerturbationBlock(Matrix<BaseFloat>* perturbed_chunk);
+
+  // The input is two matrices. One is source matrix(e.g. perturbed1), another
+  // is noise matrix(e.g. noise1). Each line is original_chunk_length(ms)(e.g. 960 dims = 120ms)
+  // add noise row-by-row with random snr. with probability (probability_threshold).
+  // After that, the source signal is perturbed by noise signal.
+  void AddNoiseBlock(BaseFloat probability_threshold,
+                     MatrixBase<BaseFloat>& source,
+                     MatrixBase<BaseFloat>& noise);
+
+  // Randomly Generate a scale number and scale the whole matrix
+  void VolumePerturbationBlock(MatrixBase<BaseFloat>& block);
+
+  // Use ArbitraryResample. Generate a speed factor randomly for the whole matrix.
+  // Then do time axis stretch.  The dim of output_vector is bigger than
+  // expected_chunk_length(ms)
+  void SpeedPerturbationBlock(Matrix<BaseFloat>& block);
+
+  // Randomly choose a expect_chunk_length(ms) vector.
+  void TimeShiftBlock(Matrix<BaseFloat>& block);
+
+ private:
+  FvectorPerturbOptions opts_;
+  Matrix<BaseFloat> perturbed1, perturbed2, noise1, noise2;
+  
+};
+
 } // end of namespace kaldi
 #endif // KALDI_FVECTOR_PERTURB_H_

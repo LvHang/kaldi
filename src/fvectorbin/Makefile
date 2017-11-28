@@ -5,7 +5,7 @@ EXTRA_CXXFLAGS = -Wno-sign-compare
 include ../kaldi.mk
 
 BINFILES = fvector-add-noise fvector-chunk fvector-get-egs \
-		   fvector-chunk-block
+		   fvector-chunk-block fvector-add-noise-block fvector-get-egs-block
 
 OBJFILES =
 
