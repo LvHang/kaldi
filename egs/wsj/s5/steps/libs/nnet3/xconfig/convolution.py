@@ -298,6 +298,26 @@ class XconfigConvLayer(XconfigLayerBase):
                                self.config['dropout-proportion']))
                 configs.append('component-node name={0}.dropout component={0}.dropout '
                                'input={1}'.format(name, cur_descriptor))
+            elif operation == 'log':
+                configs.append('component name={0}.log type=LogComponent '
+                                'dim={1}'.format(name, cur_dim))
+                configs.append('component-node name={0}.log component={0}.log '
+                                'input={1}'.format(name, cur_descriptor))
+            elif operation == 'permute':
+                column_map = []
+                for x in range(0, cur_num_filters):
+                    for y in range(0, cur_height):
+                        column_map.append(y * cur_num_filters + x)
+                column_map_str = ",".join([str(x) for x in column_map])
+                configs.append('component name={0}.permute type=PermuteComponent '
+                               'column-map={1}'.format(name, column_map_str))
+                configs.append('component-node name={0}.permute component={0}.permute '.format(name))
+            elif operation == 'so':
+                configs.append('component name={0}.so type=ScaleAndOffsetComponent '
+                           'dim={1} block-dim={2}'.format(
+                               name, cur_num_filters * cur_height, cur_num_filters))
+                configs.append('component-node name={0}.so component={0}.so '
+                               'input={1}'.format(name, cur_descriptor))
             else:
                 raise RuntimeError("Un-handled operation type: " + operation)
 

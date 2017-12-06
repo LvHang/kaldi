@@ -1296,7 +1296,14 @@ void AffineComponent::Read(std::istream &is, bool binary) {
   bias_params_.Read(is, binary);
   ExpectToken(is, binary, "<IsGradient>");
   ReadBasicType(is, binary, &is_gradient_);
-  ExpectToken(is, binary, "</AffineComponent>");
+  std::string token;
+  ReadToken(is, binary, &token);
+  if (token == "<ApplySigmoid>") {
+    bool apply_sigmoid = false;
+    ReadBasicType(is, binary, &apply_sigmoid);
+    ReadToken(is, binary, &token);
+  }
+  KALDI_ASSERT(token == "</AffineComponent>");
 }
 
 void AffineComponent::Write(std::ostream &os, bool binary) const {
