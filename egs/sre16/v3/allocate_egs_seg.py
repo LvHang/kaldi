@@ -33,10 +33,10 @@ def get_args():
             help="Seed for random number generator.")
     parser.add_argument("--data-dir", type=str, required=True,
             help="The location of original data directory which contains "
-            "feature.scp and utt2num_frames.")
+            "feature.scp ,utt2num_frames and utt2spk.")
     parser.add_argument("--output-dir", type=str, required=True,
             help="The name of output-dir. In it, there are 'kinds-of-length' directories. "
-            "In each subdirectory, it will contains the new generated feats_li.scp.")
+            "In each subdirectory, it will contains the new generated feats_li.scp and new utt2spk.")
 
     print(' '.join(sys.argv), file=sys.stderr)
     print(sys.argv, file=sys.stderr)
@@ -54,6 +54,8 @@ def process_args(args):
         raise Exception("This script expects the utt2num_frames file to exist")
     if not os.path.exists(args.data_dir+"/feats.scp"):
         raise Exception("This script expects the original feats.scp to exist")
+    if not os.path.exists(args.data_dir+"/utt2spk"):
+        raise Exception("This script expects the original utt2spk to exist")
     if args.min_frames_per_chunk <= 1:
         raise Exception("--min-frames-per-chunk is invalid")
     if args.max_frames_per_chunk < args.min_frames_per_chunk:
@@ -61,6 +63,22 @@ def process_args(args):
     if args.kinds_of_length < 1:
         raise Exception("--kinds-of-length is invalid")
     return args
+
+
+# Create utt2spk
+def get_utt2spk(utt2spk_filename):
+    utt2spk = {}
+    f = open(utt2spk_filename, "r")
+    if f is None:
+        sys.exit("Error opening utt2spk file " + str(utt2spk_filename))
+    for line in f:
+        tokens = line.split()
+        if len(tokens) != 2:
+            sys.exit("bad line in utt2spk file " + line)
+        utt2spk[tokens[0]] = tokens[1]
+    f.close()
+    return utt2spk
+# Done utt2spk
 
 
 # Create utt2len
@@ -135,6 +153,9 @@ def main():
     #utt_list is a list cotains all the original uttid
     utt2fea_filename = args.data_dir + "/feats.scp"
     utt_list, utt2fea = get_utt2fea(utt2fea_filename)
+    #utt2spk is a dict: key=uttid, value=spkid
+    utt2spk_filename = args.data_dir + "/utt2spk"
+    utt2spk = get_utt2spk(utt2spk_filename)
 
     length_types = []
     # Generate l1 ... ln
@@ -157,11 +178,19 @@ def main():
         this_fea_filename = this_dir_name + "/feats.scp"
         if not os.path.exists(this_dir_name):
             os.makedirs(this_dir_name)
-        info_f = open(this_fea_filename, "w")
-        if info_f is None:
+        
+        fea_f = open(this_fea_filename, "w")
+        if fea_f is None:
             sys.exit(str("Error opening file {0}").format(this_fea_filename))
+        
+        this_utt2spk_filename = this_dir_name + "/utt2spk"
+        spk_f = open(this_utt2spk_filename, "w")
+        if spk_f is None:
+            sys.exit(str("Error opening file {0}").format(this_utt2spk_filename))
+        
         for j in range(len(utt_list)):
             this_utt_id = utt_list[j]
+            this_spk_id = utt2spk[this_utt_id]
             this_extend = utt2fea[this_utt_id]
             this_utt_len = utt2len[this_utt_id]
             if this_utt_len < this_length:
@@ -182,8 +211,12 @@ def main():
                     new_extend = this_extend + '[' + str(start_point) + ':' + str(start_point+this_length-1) + ']'
                     print("{0} {1}".format(new_utt_id,
                                            new_extend),
-                        file=info_f)
-        info_f.close()
+                        file=fea_f)
+                    print("{0} {1}".format(new_utt_id,
+                                           this_spk_id),
+                        file=spk_f)
+        fea_f.close()
+        spk_f.close()
     print("allocate_egs_seg.py: finished")
 # Done main       
 

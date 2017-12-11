@@ -24,53 +24,27 @@
 namespace kaldi {
 namespace nnet3 {
 
-// We always use ProcessUttToSpkFile() and ProcessSpkToNumFile() together,
-// so that we can map the utt_id to pdf_id
-//
-// Process the utt2spk file and store it as a map from utterance to
-// spk_id
-static void  ProcessUttToSpkFile(const std::string utt2spk_rxfilename, 
-    unordered_map<std::string, std::string> *utt_to_spk) {
-  Input utt2spk_input(utt2spk_rxfilename);
-  if (!utt2spk_rxfilename.empty()) {
+// Process the utt2label file and store it as a map from utt_id to
+// label
+static void ProcessUttToLabelFile(const std::string utt2label_rxfilename, 
+    unordered_map<std::string, int32> *utt_to_label) {
+  Input utt2label_input(utt2label_rxfilename);
+  if (!utt2label_rxfilename.empty()) {
     std::string line;
-    while (std::getline(utt2spk_input.Stream(), line)) {
+    while (std::getline(utt2label_input.Stream(), line)) {
       std::vector<std::string> fields;
       SplitStringToVector(line, " \t\n\r", true, &fields);
       if (fields.size() != 2) {
-        KALDI_ERR << "Expected 2 fields in line of utt2spk file, got "
+        KALDI_ERR << "Expected 2 fields in line of utt2label file, got "
                   << fields.size() << " instead.";
       }
       std::string utt_id = fields[0];
-      std::string spk_id = fields[1];
-      // Add to map
-      (*utt_to_spk)[utt_id] = spk_id;
-    } // end of while 
-  } // end of if
-}
-
-
-// Process the spk2num file and store it as a map from spk_id to
-// pdf_id
-static void ProcessSpkToNumFile(const std::string spk2num_rxfilename, 
-    unordered_map<std::string, int32> *spk_to_num) {
-  Input spk2num_input(spk2num_rxfilename);
-  if (!spk2num_rxfilename.empty()) {
-    std::string line;
-    while (std::getline(spk2num_input.Stream(), line)) {
-      std::vector<std::string> fields;
-      SplitStringToVector(line, " \t\n\r", true, &fields);
-      if (fields.size() != 2) {
-        KALDI_ERR << "Expected 2 fields in line of utt2spk file, got "
-                  << fields.size() << " instead.";
-      }
-      std::string spk_id = fields[0];
-      int32 pdf_id;
-      if (!ConvertStringToInteger(fields[1], &pdf_id)) {
-        KALDI_ERR << "Expect integer for pdf_id";
+      int32 label_id;
+      if (!ConvertStringToInteger(fields[1], &label_id)) {
+        KALDI_ERR << "Expect integer for label_id";
       }
       // Add to map
-      (*spk_to_num)[spk_id] = pdf_id;
+      (*utt_to_label)[utt_id] = label_id;
     } // end of while 
   } // end of if
 }
@@ -117,10 +91,10 @@ int main(int argc, char *argv[]) {
         "the same archive is different, so that the randomness of data is increased\n"
         "For this binary, it deals with the variable length feats.scp file.\n"
         "Generate the variable length egs into egs.ark file.\n"
-        "Usage: nnet3-xvector-get-egs [options] <utt2spk-rxfilename> <spk2num-rxfilename>"
+        "Usage: nnet3-xvector-get-egs [options] <utt2label-rxfilename>"
         "<features-rspecifier> <egs-wspecifier>\n"
         "For example:\n"
-        "nnet3-xvector-get-egs-seg data/utt2spk data/spk2num scp:data/feats.scp ark,t:egs.ark\n";
+        "nnet3-xvector-get-egs-seg data/utt2label scp:data/feats.scp ark,t:egs.ark\n";
 
     bool compress = true;
     int32 num_pdfs = -1;
@@ -133,20 +107,17 @@ int main(int argc, char *argv[]) {
 
     po.Read(argc, argv);
 
-    if (po.NumArgs() != 4) {
+    if (po.NumArgs() != 3) {
       po.PrintUsage();
       exit(1);
     }
 
-    std::string utt2spk_rxfilename = po.GetArg(1),
-                spk2num_rxfilename = po.GetArg(2),
-                feature_rspecifier = po.GetArg(3),
-                egs_wspecifier = po.GetArg(4);
+    std::string utt2label_rxfilename = po.GetArg(1),
+                feature_rspecifier = po.GetArg(2),
+                egs_wspecifier = po.GetArg(3);
 
-    unordered_map<std::string, std::string> utt_to_spk;
-    ProcessUttToSpkFile(utt2spk_rxfilename, &utt_to_spk);
-    unordered_map<std::string, int32> spk_to_num;
-    ProcessSpkToNumFile(spk2num_rxfilename, &spk_to_num);
+    unordered_map<std::string, int32> utt_to_label;
+    ProcessUttToLabelFile(utt2label_rxfilename, &utt_to_label);
 
     SequentialBaseFloatMatrixReader feat_reader(feature_rspecifier);
     NnetExampleWriter egs_writer(egs_wspecifier);
@@ -155,35 +126,31 @@ int main(int argc, char *argv[]) {
           num_err = 0,
           num_egs_written = 0;
 
+    if (num_pdfs == -1) {
+      for(unordered_map<std::string, int32>::iterator iter= utt_to_label.begin();
+          iter != utt_to_label.end(); iter++) {
+        if(num_pdfs < iter->second) {
+          num_pdfs = iter->second;
+        }
+      }
+      num_pdfs = num_pdfs + 1;
+    }
+
     for (; !feat_reader.Done(); feat_reader.Next()) {
       std::string key = feat_reader.Key();
       const Matrix<BaseFloat> &feats = feat_reader.Value();
-      // Split key to get the utt_id. Now the format is <uttid>_<startpoint>_<length>
-      std::size_t last_underline = key.find_last_of('_');
-      std::string utt_and_start = key.substr(0, last_underline);
-      std::size_t second_last_underline = utt_and_start.find_last_of('_');
-      std::string utt = utt_and_start.substr(0, second_last_underline);
-
-      unordered_map<std::string, std::string>::iterator got_spk;
-      unordered_map<std::string, int32>::iterator got_pdf;
-      got_spk = utt_to_spk.find(utt);
-      if (got_spk == utt_to_spk.end()) {
-        KALDI_WARN << "Could not find the spk_id of this utterance:" << utt;
+      
+      // Now the format is <uttid>_<startpoint>_<length> 
+      unordered_map<std::string, int32>::iterator got_label;
+      got_label = utt_to_label.find(key);
+      if (got_label == utt_to_label.end()) {
+        KALDI_WARN << "Could not find the label of this utterance:" << key;
         num_err++;
       } else {
-        got_pdf = spk_to_num.find(got_spk->second);
-        if (got_pdf == spk_to_num.end()) {
-          KALDI_WARN << "Could not find the pdf_id of this spker:" << got_spk->second;
-        } else {
-          //Write the Example
-          int32 this_pdf_id = got_pdf->second;
-          if (num_pdfs == -1) {
-            num_pdfs = spk_to_num.size();
-          }
-          WriteExamples(feats, this_pdf_id, key, compress, num_pdfs,
-              num_egs_written, egs_writer);
-          num_done++;
-        }
+        int32 this_pdf_id = got_label->second;
+        WriteExamples(feats, this_pdf_id, key, compress, num_pdfs,
+            num_egs_written, egs_writer);
+        num_done++;
       }
     }
 
