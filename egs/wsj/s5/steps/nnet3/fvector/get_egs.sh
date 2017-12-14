@@ -19,10 +19,10 @@ frames_per_iter=100000 # have this many frames per archive.
                        # That means we keep the capacity of fvector with xvector.
 frames_per_iter_diagnostic=10000 # have this many frames per achive for the
                                  # archives used for diagnostics.
-num_diagnoistic_percent=5  # we want to test the training and validation likelihoods
+num_diagnostic_percent=5  # we want to test the training and validation likelihoods
                            # on a range of utterance lengths, and this number
                            # controls how many archives we evaluate on. Select
-                           # "num_diagnoistic_percent"% train data to be valid
+                           # "num_diagnostic_percent"% train data to be valid
 compress=true
 generate_egs_scp=true
 
@@ -64,15 +64,15 @@ done
 mkdir -p $egs_dir
 mkdir -p $egs_dir/log
 mkdir -p $egs_dir/info
-num_utts=$(cat $data/wav.scp | wc -l)
-num_valid=num_utts * num_diagnoistic_percent / 100;
+num_utts=$(cat $data_dir/wav.scp | wc -l)
+num_valid=num_utts * num_diagnostic_percent / 100;
 
 #Assume recording-id == utt-id
 if [ $stage -le 1 ]; then
   #Get list of validation utterances.
-  awk '{print $1}' $data/wav.scp | utils/shuffle_list.pl | head -$num_valid \
+  awk '{print $1}' $data_dir/wav.scp | utils/shuffle_list.pl | head -$num_valid \
    > $egs_dir/info/valid_uttlist
-  awk '{print $1}' $data/wav.scp | utils/filter_scp.pl --exclude $egs_dir/valid_uttlist | \
+  awk '{print $1}' $data_dir/wav.scp | utils/filter_scp.pl --exclude $egs_dir/valid_uttlist | \
    > $egs_dir/info/train_uttlist
 fi
 
@@ -82,7 +82,7 @@ if [ $stage -le 2 ]; then
   sdata=$data_dir/split$nj
   utils/data/split_data.sh $data_dir $nj || exit 1;
   $cmd JOB=1:$nj $egs_dir/log/cut_train_wav_into_chunks.JOB.log \
-    fvector-chunk --chunk-size=120 "scp:utils/filter_scp.pl --exclude $egs_dir/info/valid_uttlist $sdata/JOB/wav.scp" \
+    fvector-chunk --chunk-size=120 "scp:utils/filter_scp.pl --exclude $egs_dir/info/valid_uttlist $sdata/JOB/wav.scp |" \
       scp:$noise_dir/wav.scp $noise_dir/utt2dur_fix \
       ark,scp:$egs_dir/orign_train_chunks.JOB.ark,$egs_dir/orign_train_chunks.JOB.scp
   for n in $(seq $nj); do
@@ -90,7 +90,7 @@ if [ $stage -le 2 ]; then
   done > $data_dir/orign_train_chunks.all.scp
 
   $cmd $egs_dir/log/cut_valid_wav_into_chunks.log \
-    fvector-chunk --chunk-size=120 "scp:utils/filter_scp.pl $egs_dir/valid_uttlist $data_dir/wav.scp" \
+    fvector-chunk --chunk-size=120 "scp:utils/filter_scp.pl $egs_dir/valid_uttlist $data_dir/wav.scp |" \
       scp:$noise_dir/wav.scp $noise_dir/utt2dur_fix \
       ark,scp:$egs_dir/orign_valid_chunks.ark,$egs_dir/orign_valid_chunks.scp
   cp $egs_dir/orign_valid_chunks.scp $data_dir/orign_valid_chunks.scp

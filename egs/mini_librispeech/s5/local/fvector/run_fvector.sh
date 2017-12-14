@@ -13,25 +13,25 @@ fvector_dir=exp/fvector
 . ./cmd.sh
 . ./utils/parse_options.sh
 
-if [ $stage -le 3 ]; then
+if [ $train_stage -le 2 ]; then
   #dump egs                                         
-  if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $fvector_dir/egs/storage ]; then  
-    utils/create_split_dir.pl \                                                 
-    /export/b{03,11,12,13}/$USER/kaldi-data/egs/minilibrispeech-$(date +'%m_%d_%H_%M')/s5/$egs_dir/storage $egs_dir/storage
-  fi                                                                            
-                                  
-  steps/nnet3/fvector/get_egs.sh --cmd "$train_cmd" \                       
-    --nj 8 \                                                                    
-    --stage 0 \                                                                 
-    --frames-per-iter 2000000 \                                                 
-    --frames-per-iter-diagnostic 200000 \                                       
-    --num-diagnostic-archives 1 \                                               
+  if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $egs_dir/storage ]; then  
+    utils/create_split_dir.pl \
+    /export/b{11,12,13,14}/$USER/kaldi-data/egs/minilibrispeech-$(date +'%m_%d_%H_%M')/s5/$egs_dir/storage $egs_dir/storage
+  fi
+
+  steps/nnet3/fvector/get_egs.sh --cmd "$train_cmd" \
+    --nj 8 \
+    --stage 0 \
+    --frames-per-iter 2000000 \
+    --frames-per-iter-diagnostic 200000 \
+    --num-diagnostic-percent 5 \
     "$data" "$noise_data" "$egs_dir"
 fi
 
-if [ $stage -le 4 ]; then
-  #prepare configs
-fi
+#if [ $stage -le 4 ]; then
+#  #prepare configs
+#fi
 
 if [ $stage -le 5 ]; then
   #training
