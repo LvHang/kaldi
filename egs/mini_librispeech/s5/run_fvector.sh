@@ -9,7 +9,7 @@ lm_url=www.openslr.org/resources/11
 . ./cmd.sh
 . ./path.sh
 
-stage=0
+stage=2
 . utils/parse_options.sh
 
 set -euo pipefail

@@ -9,16 +9,18 @@ namespace kaldi {
 //selected from [0, len(utt)-chunk_size].
 void RandomSelectTwoNoiseUtt(const std::vector<std::pair<std::string, float>>& utt2dur_list,
                              const int32& utt2dur_len,
-                             const int32& chunk_size,
+                             const BaseFloat& sample_frequency,
+                             const BaseFloat& chunk_size,
                              std::vector<std::pair<std::string, float>>* output) {
   for(int32 index = 0; index < 2; ++index) {
     int32 r_index = -1;
     do {
       // r_index indicate the random index of utt2dur_list
       r_index = RandInt(0, utt2dur_len-1);
-    } while (utt2dur_list[r_index].second > chunk_size);
+    } while (utt2dur_list[r_index].second < chunk_size);
     // random number in [0, utt2dur]
-    float start_point = RandInt(0, (int)(utt2dur_list[r_index].second)*100) * 1.0 / 100;
+    int boundary = (int)((utt2dur_list[r_index].second - chunk_size) * 1000);
+    float start_point = RandInt(0, boundary);
     output->push_back(std::make_pair(utt2dur_list[r_index].first, start_point));
   }
   KALDI_ASSERT(output->size() == 2);
@@ -75,7 +77,11 @@ int main(int argc, char *argv[]) {
     RandomAccessTableReader<WaveHolder> noise_reader(noise_rspecifier);
     Input ki(utt2dur_rxfilename);
     BaseFloatMatrixWriter kaldi_writer;  // typedef to TableWriter<something>.
-
+    
+    if (!kaldi_writer.Open(output_wspecifier)) {
+      KALDI_ERR << "Could not initialize output with wspecifier "
+                << output_wspecifier;
+    }
     //Read the utt2dur file
     //the vector--utt2dur is used to randomly select the noise chunk.
     std::vector<std::pair<std::string, float>> utt2dur;
@@ -132,16 +138,15 @@ int main(int argc, char *argv[]) {
           }
         }
       }
-
       SubVector<BaseFloat> waveform(wave_data.Data(), this_chan);
       //e.g. A "waveform" is 285ms, chunk_size is 120ms, shift_time is 70ms. At last, the chunks
       //will be 0-120ms, 70-190ms, 140-260ms. So num_chunk = 3
-      int32 num_chunk = (int)((waveform.Dim() / wave_data.SampFreq() - chunk_size ) / shift_time) + 1;
+      int32 num_chunk = (int)(((waveform.Dim() * 1.0 / wave_data.SampFreq()) * 1000 - chunk_size ) / shift_time) + 1;
       int32 dim = wave_data.SampFreq() * chunk_size / 1000;
       try {
         for (int32 index = 0; index < num_chunk; ++index) {
           Matrix<BaseFloat> features(3, dim);
-          int32 source_start = wave_data.SampFreq() * (index * shift_time);
+          int32 source_start = static_cast<int32>(wave_data.SampFreq() * (index * shift_time / 1000.0));
           features.CopyRowFromVec(SubVector<BaseFloat>(waveform, source_start, dim), 0);
           //1. Generate 2 random number form [0, utt2dur_len)
           //2. From vector utt2dur, get the 2 pairs
@@ -150,7 +155,7 @@ int main(int argc, char *argv[]) {
           //The output vector, "two_random_uttid", contains two pairs. For each
           //pair, its content is <uttid, start_point>
           std::vector<std::pair<std::string, float>> two_random_uttid;
-          RandomSelectTwoNoiseUtt(utt2dur, utt2dur_len, chunk_size/1000, 
+          RandomSelectTwoNoiseUtt(utt2dur, utt2dur_len, wave_data.SampFreq(), chunk_size/1000.0, 
                                   &two_random_uttid);
           //4. According to the utt2dur[x][0]--utt_id and startpoint form RandomAccessTable
           //   read noise chunk.
@@ -163,7 +168,7 @@ int main(int argc, char *argv[]) {
           const WaveData &noise_wav2 = noise_reader.Value(two_random_uttid[1].first);
           KALDI_ASSERT(wave_data.SampFreq() == noise_wav2.SampFreq());
           SubVector<BaseFloat> noise2(noise_wav2.Data(), 0);
-          features.CopyRowFromVec(SubVector<BaseFloat>(noise2, two_random_uttid[1].second, dim), 1);
+          features.CopyRowFromVec(SubVector<BaseFloat>(noise2, two_random_uttid[1].second, dim), 2);
 
           std::ostringstream utt_id_new;
           utt_id_new << utt << '_' << index;

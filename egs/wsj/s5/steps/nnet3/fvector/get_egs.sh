@@ -12,18 +12,20 @@
 
 # Begin configuration section.
 cmd=run.pl
-frames_per_iter=100000 # have this many frames per archive.
+egs_per_iter=12500     # have this many frames per archive.
                        # In xvector setup, this item is 2 milion and each frame
                        # is 40 dims. In fvector case, the dimension is about
-                       # 100ms * 8kHz = 800. So (2milion * 40 / 800)
+                       # 1egs=100ms=2 * 8frames* (16kHz * 25ms)= 6400.
+                       # So (2milion * 40 / 6400)
                        # That means we keep the capacity of fvector with xvector.
-frames_per_iter_diagnostic=10000 # have this many frames per achive for the
+egs_per_iter_diagnostic=10000    # have this many frames per achive for the
                                  # archives used for diagnostics.
-num_diagnostic_percent=5  # we want to test the training and validation likelihoods
+num_diagnostic_percent=5   # we want to test the training and validation likelihoods
                            # on a range of utterance lengths, and this number
                            # controls how many archives we evaluate on. Select
                            # "num_diagnostic_percent"% train data to be valid
 compress=true
+srand=0
 generate_egs_scp=true
 
 stage=0
@@ -57,7 +59,7 @@ data_dir=$1
 noise_dir=$2
 egs_dir=$3
 
-for f in $data_dir/wav.scp $noise_dir/wav.scp $noise_dir/utt2dur; do
+for f in $data_dir/wav.scp $noise_dir/wav.scp $noise_dir/utt2dur_fix; do
   [ ! -f $f ] && echo "$0: expected file $f to exist" && exit 1;
 done
 
@@ -65,17 +67,16 @@ mkdir -p $egs_dir
 mkdir -p $egs_dir/log
 mkdir -p $egs_dir/info
 num_utts=$(cat $data_dir/wav.scp | wc -l)
-num_valid=num_utts * num_diagnostic_percent / 100;
+num_valid=$num_utts * num_diagnostic_percent / 100;
 
 #Assume recording-id == utt-id
 if [ $stage -le 1 ]; then
   #Get list of validation utterances.
   awk '{print $1}' $data_dir/wav.scp | utils/shuffle_list.pl | head -$num_valid \
-   > $egs_dir/info/valid_uttlist
-  awk '{print $1}' $data_dir/wav.scp | utils/filter_scp.pl --exclude $egs_dir/valid_uttlist | \
-   > $egs_dir/info/train_uttlist
+   > ${egs_dir}/info/valid_uttlist
+  awk '{print $1}' $data_dir/wav.scp | utils/filter_scp.pl --exclude $egs_dir/info/valid_uttlist | \
+   > ${egs_dir}/info/train_uttlist
 fi
-
 # get the (120ms) chunks from wav.scp and noise.scp. And compose 1 source
 # chunk and 2 noise chunks into a matrix.
 if [ $stage -le 2 ]; then
@@ -86,20 +87,21 @@ if [ $stage -le 2 ]; then
       scp:$noise_dir/wav.scp $noise_dir/utt2dur_fix \
       ark,scp:$egs_dir/orign_train_chunks.JOB.ark,$egs_dir/orign_train_chunks.JOB.scp
   for n in $(seq $nj); do
-    cat $egs_dir/orign_train_chunks.$n.scp || exit 1;
+    cat $egs_dir/orign_train_chunks.${n}.scp || exit 1;
   done > $data_dir/orign_train_chunks.all.scp
 
   $cmd $egs_dir/log/cut_valid_wav_into_chunks.log \
-    fvector-chunk --chunk-size=120 "scp:utils/filter_scp.pl $egs_dir/valid_uttlist $data_dir/wav.scp |" \
+    fvector-chunk --chunk-size=120 "scp:utils/filter_scp.pl $egs_dir/info/valid_uttlist $data_dir/wav.scp |" \
       scp:$noise_dir/wav.scp $noise_dir/utt2dur_fix \
       ark,scp:$egs_dir/orign_valid_chunks.ark,$egs_dir/orign_valid_chunks.scp
   cp $egs_dir/orign_valid_chunks.scp $data_dir/orign_valid_chunks.scp
 fi
 
 echo "$0: Generate the egs for train dataset."
+
 #each chunk will generate two "NnetIo"s
-num_frames=$(cat $data_dir/orign_train_chunks.all.scp | wc -l) * 2
-num_archives=$[$num_frames/$frames_per_iter+1];
+num_egs=$(cat $data_dir/orign_train_chunks.all.scp | wc -l)
+num_archives=$[$num_egs/$egs_per_iter+1]
 # We may have to first create a smaller number of larger archives, with number
 # $num_archives_intermediate, if $num_archives is more than the maximum number
 # of open filehandles that the system allows per process (ulimit -n).
@@ -126,7 +128,6 @@ if [ -e $egs_dir/storage ]; then
     utils/create_data_link.pl $(for y in $(seq $nj); do echo $egs_dir/egs_orig.$y.$x.ark; done)
   done
 fi
-
 # Deal with the chunk one-by-one, add the noise.
 # convert the chunk data into Nnet3eg
 if [ $stage -le 3 ]; then
@@ -138,9 +139,9 @@ if [ $stage -le 3 ]; then
   done
   echo "$0: Do data perturbation and dump on disk"
   #The options could be added in this line
-  train_fvector_add_noise="scp:fvector-add-noise scp:$egs_dir/orign_train_chunks.JOB.scp ark:- |"
   $cmd JOB=1:$nj $egs_dir/log/do_train_perturbation_and_get_egs.JOB.log \
-    fvector-get-egs "$train_fvector_add_noise" ark:- \| \
+    fvector-add-noise scp:$egs_dir/orign_train_chunks.JOB.scp ark:- \| \
+    fvector-get-egs ark:- ark:- \| \
     nnet3-copy-egs --random=true --srand=\$[JOB+$srand] ark:- $egs_list || exit 1;
 fi
 
@@ -160,9 +161,9 @@ if [ $stage -le 4 ]; then
 
   if [ $archives_multiple == 1 ]; then # normal case.
     if $generate_egs_scp; then
-      output_archive="ark,scp:$dir/egs.JOB.ark,$dir/egs.JOB.scp"
+      output_archive="ark,scp:$egs_dir/egs.JOB.ark,$egs_dir/egs.JOB.scp"
     else
-      output_archive="ark:$dir/egs.JOB.ark"
+      output_archive="ark:$egs_dir/egs.JOB.ark"
     fi
     $cmd --max-jobs-run $nj JOB=1:$num_archives_intermediate $egs_dir/log/shuffle.JOB.log \
       nnet3-shuffle-egs --srand=\$[JOB+$srand] "ark:cat $egs_list|" $output_archive  || exit 1;
@@ -215,9 +216,10 @@ fi
 echo "$0: Generate the egs for valid dataset"
 if [ $stage -le 5 ]; then
   valid_fvector_add_noise="scp:fvector-add-noise scp:$egs_dir/orign_valid_chunks.scp ark:- |"
-  $cmd $egs_dir/log/do_valid_perturbation_and_get_egs.JOB.log \
-    fvector-get-egs "$valid_fvector_add_noise" ark:- \| \
-    nnet3-copy-egs --random=true --srand=\$[JOB+$srand] ark:$egs_dir/valid.egs || exit 1;
+  $cmd $egs_dir/log/do_valid_perturbation_and_get_egs.log \
+    fvector-add-noise scp:$egs_dir/orign_valid_chunks.scp ark:- \| \
+    fvector-get-egs ark:- ark:- \| \
+    nnet3-copy-egs --random=true --srand=$srand ark:- ark:$egs_dir/valid.egs || exit 1;
   #get the valid.egs
 fi
 

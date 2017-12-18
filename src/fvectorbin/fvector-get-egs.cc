@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
     bool compress = true;
     BaseFloat frame_length_ms = 25; // in milliseconds
     BaseFloat frame_shift_ms = 10; // in milliseconds
-    BaseFloat samp_freq;
+    BaseFloat samp_freq=16000;
 
     ParseOptions po(usage);
     po.Register("compress", &compress, "If true, write egs in "
@@ -56,13 +56,12 @@ int main(int argc, char *argv[]) {
 
     std::string feature_rspecifier = po.GetArg(1);
     NnetExampleWriter example_writer(po.GetArg(2));
-
-
+    
     SequentialBaseFloatMatrixReader feature_reader(feature_rspecifier);
 
     int32 num_read = 0,
           num_egs_written = 0;
-    for (; feature_reader.Done(); feature_reader.Next(), num_read++) {
+    for (; !feature_reader.Done(); feature_reader.Next(), num_read++) {
       std::string key = feature_reader.Key();
       const Matrix<BaseFloat> &feats = feature_reader.Value();
       //Please take care. Here, the 'feats' is a 2-lines matrix which is generated
@@ -71,16 +70,17 @@ int main(int argc, char *argv[]) {
       //chunk1 and chunk2 corresponds to one line respectively.
       SubVector<BaseFloat> chunk1(feats, 0),
                            chunk2(feats, 1);
+
       //According to frame_length and frame_shift, cut the chunk into few pieces
       //so that it is similiar with normal feature extract procedure.
-      int num_rows = ((int)((chunk1.Dim() / samp_freq - frame_length_ms) / 
+      int num_rows = ((int)(((chunk1.Dim() * 1.0 / samp_freq) * 1000 - frame_length_ms) / 
                             frame_shift_ms) + 1);
-      int num_cols = (int)(samp_freq * frame_length_ms);
+      int num_cols = (int)(samp_freq / 1000.0 * frame_length_ms);
       Matrix<BaseFloat> chunk1_matrix(num_rows, num_cols),
                         chunk2_matrix(num_rows, num_cols);
       for (MatrixIndexT i = 0; i < num_rows; i++) {
-        chunk1_matrix.Row(i).CopyFromVec(chunk1.Range(i*num_cols, num_cols));
-        chunk2_matrix.Row(i).CopyFromVec(chunk2.Range(i*num_cols, num_cols));
+        chunk1_matrix.Row(i).CopyFromVec(chunk1.Range(i*frame_shift_ms*samp_freq/1000, num_cols));
+        chunk2_matrix.Row(i).CopyFromVec(chunk2.Range(i*frame_shift_ms*samp_freq/1000, num_cols));
       }
       //generate the NnetIo
       NnetIo nnet_io1 = NnetIo("input", 0, chunk1_matrix),

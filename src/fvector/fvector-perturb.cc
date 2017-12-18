@@ -26,8 +26,8 @@ void FvectorPerturb::ApplyPerturbation(const MatrixBase<BaseFloat>& input_chunk,
     //always smaller than original_length) for each line.
     //(1) a=min{original_length/expected_length -1, max-speed-perturb-rate}
     //(2) the range of factor is (1-a, 1+a)
-    BaseFloat boundary = std::min((input_chunk.NumCols() / opts_.sample_frequency) / opts_.expected_chunk_length - 1,
-                                  opts_.max_speed_perturb_rate);
+    BaseFloat boundary = std::min(static_cast<BaseFloat>((input_chunk.NumCols() * 1.0 / opts_.sample_frequency)
+          * 1000 / opts_.expected_chunk_length - 1), opts_.max_speed_perturb_rate);
     for (MatrixIndexT i = 0; i < original_dim_matrix.NumRows(); ++i) {
       //caculate the speed factor
       BaseFloat factor =static_cast<BaseFloat> (RandInt(

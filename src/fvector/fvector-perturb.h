@@ -28,7 +28,7 @@ struct FvectorPerturbOptions {
   bool time_shift;
   BaseFloat add_noise;
 
-  FvectorPerturbOptions(): sample_frequency(8000),
+  FvectorPerturbOptions(): sample_frequency(16000),
                            expected_chunk_length(100),
                            max_speed_perturb_rate(0.1),
                            max_volume_variance(0.03),
@@ -41,7 +41,7 @@ struct FvectorPerturbOptions {
 
   void Register(OptionsItf *opts) {
     opts->Register("sample-frequency", &sample_frequency, "The sample frequency "
-                   "of the wav signal. (float, default = 8000)");
+                   "of the wav signal. (float, default = 16000)");
     opts->Register("expected-chunk-length", &expected_chunk_length, "It show the "
                    "length of chunk you expected. e.g. 100ms. That means the length "
                    "of output will correspond to 100ms. At the same time, it will "
