@@ -32,7 +32,8 @@ def train_new_models(dir, iter, srand, num_jobs,
                      run_opts, frames_per_eg=-1,
                      min_deriv_time=None, max_deriv_time_relative=None,
                      use_multitask_egs=False,
-                     backstitch_training_scale=0.0, backstitch_training_interval=1):
+                     backstitch_training_scale=0.0, backstitch_training_interval=1,
+                     compiler_cache_capacity=64):
     """ Called from train_one_iteration(), this model does one iteration of
     training with 'num_jobs' jobs, and writes files like
     exp/tdnn_a/24.{1,2,3,..<num_jobs>}.raw
@@ -142,6 +143,7 @@ def train_new_models(dir, iter, srand, num_jobs,
                     --backstitch-training-scale={backstitch_training_scale} \
                     --l2-regularize-factor={l2_regularize_factor} \
                     --backstitch-training-interval={backstitch_training_interval} \
+                    --compiler.cache-capacity={compiler_cache_capacity} \
                     --srand={srand} \
                     {deriv_time_opts} "{raw_model}" "{egs_rspecifier}" \
                     {dir}/{next_iter}.{job}.raw""".format(
@@ -157,6 +159,7 @@ def train_new_models(dir, iter, srand, num_jobs,
                 l2_regularize_factor=1.0/num_jobs,
                 backstitch_training_scale=backstitch_training_scale,
                 backstitch_training_interval=backstitch_training_interval,
+                compiler_cache_capacity=compiler_cache_capacity,
                 deriv_time_opts=" ".join(deriv_time_opts),
                 raw_model=raw_model_string,
                 egs_rspecifier=egs_rspecifier),
@@ -179,6 +182,7 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                         get_raw_nnet_from_am=True,
                         use_multitask_egs=False,
                         backstitch_training_scale=0.0, backstitch_training_interval=1,
+                        compiler_cache_capacity=64,
                         compute_per_dim_accuracy=False):
     """ Called from steps/nnet3/train_*.py scripts for one iteration of neural
     network training
@@ -278,7 +282,8 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                      image_augmentation_opts=image_augmentation_opts,
                      use_multitask_egs=use_multitask_egs,
                      backstitch_training_scale=backstitch_training_scale,
-                     backstitch_training_interval=backstitch_training_interval)
+                     backstitch_training_interval=backstitch_training_interval,
+                     compiler_cache_capacity=compiler_cache_capacity)
 
     [models_to_average, best_model] = common_train_lib.get_successful_models(
          num_jobs, '{0}/log/train.{1}.%.log'.format(dir, iter))

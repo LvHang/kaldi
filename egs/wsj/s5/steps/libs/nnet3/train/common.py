@@ -918,6 +918,11 @@ class CommonParser(object):
                                  action=common_lib.StrToBoolAction,
                                  help="Compute train and validation "
                                  "accuracy per-dim")
+        self.parser.add_argument("--trainer.optimization.compiler_cache_capacity",
+                                 type=int, dest='compiler_cache_capacity',
+                                 default=64, help="""Determines how many computation
+                                 the computation-cache will store.""")
+
 
         # General options
         self.parser.add_argument("--stage", type=int, default=-4,
