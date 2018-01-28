@@ -26,8 +26,8 @@ namespace nnet3 {
 
 // Process the utt2label file and store it as a map from utt_id to
 // label
-static void ProcessUttToLabelFile(const std::string utt2label_rxfilename, 
-    unordered_map<std::string, int32> *utt_to_label) {
+static void ProcessUttToLabelFile(const std::string &utt2label_rxfilename, 
+    unordered_map<std::string, int32, StringHasher> *utt_to_label) {
   Input utt2label_input(utt2label_rxfilename);
   if (!utt2label_rxfilename.empty()) {
     std::string line;
@@ -50,10 +50,10 @@ static void ProcessUttToLabelFile(const std::string utt2label_rxfilename,
 }
 
 
-static void WriteExamples(const MatrixBase<BaseFloat> &feats,
-  const int32 &this_pdf_id, const std::string &key,
+static void WriteExample(const MatrixBase<BaseFloat> &feats,
+  const int32 this_pdf_id, const std::string &key,
   bool compress, int32 num_pdfs, int32 &num_egs_written,
-  NnetExampleWriter &example_writer) {
+  NnetExampleWriter *example_writer) {
 
   NnetIo nnet_input = NnetIo("input", 0, feats);
   for (std::vector<Index>::iterator indx_it = nnet_input.indexes.begin();
@@ -71,7 +71,7 @@ static void WriteExamples(const MatrixBase<BaseFloat> &feats,
     eg.Compress();
   }
 
-  example_writer.Write(key, eg);
+  example_writer->Write(key, eg);
   num_egs_written++;
 }
 
@@ -116,7 +116,7 @@ int main(int argc, char *argv[]) {
                 feature_rspecifier = po.GetArg(2),
                 egs_wspecifier = po.GetArg(3);
 
-    unordered_map<std::string, int32> utt_to_label;
+    unordered_map<std::string, int32, StringHasher> utt_to_label;
     ProcessUttToLabelFile(utt2label_rxfilename, &utt_to_label);
 
     SequentialBaseFloatMatrixReader feat_reader(feature_rspecifier);
@@ -127,8 +127,8 @@ int main(int argc, char *argv[]) {
           num_egs_written = 0;
 
     if (num_pdfs == -1) {
-      for(unordered_map<std::string, int32>::iterator iter= utt_to_label.begin();
-          iter != utt_to_label.end(); iter++) {
+      for(unordered_map<std::string, int32, StringHasher>::const_iterator 
+          iter= utt_to_label.begin(); iter != utt_to_label.end(); iter++) {
         if(num_pdfs < iter->second) {
           num_pdfs = iter->second;
         }
@@ -141,15 +141,16 @@ int main(int argc, char *argv[]) {
       const Matrix<BaseFloat> &feats = feat_reader.Value();
       
       // Now the format is <uttid>_<startpoint>_<length> 
-      unordered_map<std::string, int32>::iterator got_label;
+      unordered_map<std::string, int32, StringHasher>::iterator got_label;
       got_label = utt_to_label.find(key);
       if (got_label == utt_to_label.end()) {
         KALDI_WARN << "Could not find the label of this utterance:" << key;
         num_err++;
       } else {
         int32 this_pdf_id = got_label->second;
-        WriteExamples(feats, this_pdf_id, key, compress, num_pdfs,
-            num_egs_written, egs_writer);
+        KALDI_ASSERT(this_pdf_id < num_pdfs);
+        WriteExample(feats, this_pdf_id, key, compress, num_pdfs,
+            num_egs_written, &egs_writer);
         num_done++;
       }
     }
