@@ -115,8 +115,7 @@ int main(int argc, char *argv[]) {
                 "hand, especially for the small dataset such as valid or "
                 "train_sub set. As the kind of small dataset doesn't guarantee "
                 "contain the last speaker so that the calculated num-pdfs value "
-                "may smaller than actual num-pdfs. This will lead to mismatch."
-                "(int, default = -1)");
+                "may smaller than actual num-pdfs. This will lead to mismatch.");
 
     po.Read(argc, argv);
 
