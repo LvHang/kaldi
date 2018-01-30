@@ -232,9 +232,9 @@ def main():
                     raise Exception("{0} is not a suitable length".format(this_length))
                 continue
             else:
-                this_utt_boundary = int(this_utt_len - this_length)
                 num_segs = max(int(float(this_utt_len) / this_length * 
                         args.num_repeats / args.kinds_of_length), 1)
+                this_utt_boundary = int(this_utt_len - this_length)
                 num_segs = min(num_segs, this_utt_boundary)
                 # we divid the range [0, this_utt_boundary) into num_segs portions
                 this_seg = int(this_utt_boundary / num_segs)
