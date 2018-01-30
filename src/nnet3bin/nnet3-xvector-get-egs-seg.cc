@@ -102,10 +102,16 @@ int main(int argc, char *argv[]) {
     int32 num_pdfs = -1;
 
     ParseOptions po(usage);
-    po.Register("compress", &compress, "If true, write egs in "
-                "compressed format.");
+    po.Register("compress", &compress, "If true, write egs in compressed format.");
     po.Register("num-pdfs", &num_pdfs, "Number of speakers in the training "
-                "list.");
+                "list. If this option is not supplied, it will be set to the "
+                "maximum value in utt2label file plus 1, since the label is "
+                "zero-based. We strongly recommend that you set this value by "
+                "hand, especially for the small dataset such as valid or "
+                "train_sub set. As the kind of small dataset doesn't guarantee "
+                "contain the last speaker so that the calculated num-pdfs value "
+                "may smaller than actual num-pdfs. This will lead to mismatch."
+                "(int, default = -1)");
 
     po.Read(argc, argv);
 
