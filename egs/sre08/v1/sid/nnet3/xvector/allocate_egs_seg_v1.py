@@ -9,12 +9,14 @@ For generating egs for xvector in a more effecient way, we use "ranges in
 script-file lines" method(for taking sub-parts of matrices) in this script 
 rather than generating range.* files ever as before.
 
-We generate new feats.scp in data_li directory. The data_li directory means
-the length of all the utterances in this directory is "li".
-(To describle clearly, we denote the feats.scp in data_li directory as feats_li.scp)
+We generate new feats.scp in data_len_i directory. The data_len_i directory means
+the length of all the utterances in this directory is "len_i". In practise, "len_i"
+will be replaced by a specific value. For example, if a directory names "data_284",
+the length of all the egs in this directory is 284 frames.
+(To describle clearly, we denote the feats.scp in data_len_i directory as feats_len_i.scp)
 
 The number of total frames is frames(feat.scp) * num_repeat.
-So frmaes(feats_li.scp) == (1/kinds_of_length) * frames(feats.scp) * num_repeat
+So frames(feats_len_i.scp) == (1/kinds_of_length) * frames(feats.scp) * num_repeat
 
 We caculate how many segment should be generated for each utterance. And then
 we average the utterance and randomly select the startpoint in each segment.
@@ -57,7 +59,7 @@ def get_args():
             "feats.scp ,utt2num_frames and utt2spk.")
     parser.add_argument("--output-dir", type=str, required=True,
             help="The name of output-dir. In it, there are 'kinds-of-length' directories. "
-            "In each subdirectory, it will contains the new generated feats_li.scp and new utt2spk.")
+            "In each subdirectory, it will contains the new generated feats.scp and new utt2spk.")
 
     print(' '.join(sys.argv), file=sys.stderr)
     print(sys.argv, file=sys.stderr)
@@ -196,14 +198,13 @@ def main():
         length_types = deterministic_chunk_length(args.min_frames_per_chunk,
                 args.max_frames_per_chunk, args.kinds_of_length)
     
-    # Generate new feats_li.scp in data_li directory
+    # Generate new feats_len_i.scp in data_len_i directory
     # As we hope the total_frames == frames(feats.scp) * num_repeat
-    # So frmaes(feats_li.scp) == (1/kinds_of_length) * frames(feats.scp) * num_repeat
-    # So for each utterance in feats.scp, the number of it in new feats_li.scp
-    # is max{(|utt|/|li|) * num_repeat / kinds_of_length, 1}
-    for i in range(0, args.kinds_of_length):
+    # So frames(feats_len_i.scp) == (1/kinds_of_length) * frames(feats.scp) * num_repeat
+    # So for each utterance in feats.scp, the number of it in new feats_len_i.scp
+    # is max{(|utt|/|len_i|) * num_repeat / kinds_of_length, 1}
+    for this_length in length_types:
         num_err = 0
-        this_length = length_types[i]
         this_dir_name = '{0}/data_{1}'.format(args.output_dir, this_length)
         this_feats_filename = "{0}/feats.scp".format(this_dir_name)
         if not os.path.exists(this_dir_name):
@@ -231,14 +232,14 @@ def main():
                     raise Exception("{0} is not a suitable length".format(this_length))
                 continue
             else:
+                this_utt_boundary = int(this_utt_len - this_length)
                 num_segs = max(int(float(this_utt_len) / this_length * 
                         args.num_repeats / args.kinds_of_length), 1)
-                this_utt_boundary = int(this_utt_len - this_length)
                 num_segs = min(num_segs, this_utt_boundary)
                 # we divid the range [0, this_utt_boundary) into num_segs portions
                 this_seg = int(this_utt_boundary / num_segs)
                 for k in range(num_segs):
-                    start_point = random.randint(k*this_seg, (k+1)*this_seg )
+                    start_point = random.randint(k*this_seg, (k+1)*this_seg)
                     new_utt_id = '{0}-{1}-{2}'.format(this_utt_id, start_point, this_length)
                     new_extend = '{0}[{1}:{2}]'.format(this_extend, start_point, start_point+this_length-1)
                     print("{0} {1}".format(new_utt_id, new_extend),

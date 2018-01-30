@@ -15,9 +15,9 @@ def get_args():
             "to generate some new feats.scp which corresponds "
             "to a specific length. After then, we can combine the new files, "
             "shuffle the list and split it into pieces. At last, we use "
-            "nnet3-xvector-get-egs-seg to dump egs. The format of new feats_li.scp"
-            "(In acutal, it is feats.scp in data_li directory, we call it "
-            "feats_li.scp so that it looks meaningful)is "
+            "nnet3-xvector-get-egs-seg to dump egs. The format of new feats_len_i.scp"
+            "(In acutal, it is feats.scp in data_len_i directory, we call it "
+            "feats_len_i.scp so that it looks meaningful)is "
             "<original_uttid-startpoint-len> <extend-filename-of-features[startpoint, startpoint+len-1]>.",
             epilog="Called by sid/nnet3/xvector/get_egs_seg.sh")
     parser.add_argument("--min-frames-per-chunk", type=int, default=50,

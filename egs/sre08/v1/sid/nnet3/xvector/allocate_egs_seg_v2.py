@@ -185,7 +185,7 @@ def main():
                 args.max_frames_per_chunk, args.kinds_of_length)
     
     if (args.generate_validate == "false") :
-        # Generate new feats.scp in data_li directory
+        # Generate new feats.scp in data_len_i directory
         # As we hope each kind of "segment length" contains $frames_per_kind frames
         # So each utterance produces "$frames_per_kind/$num_utterances * length"
         # segments(e.g. 2.5).
