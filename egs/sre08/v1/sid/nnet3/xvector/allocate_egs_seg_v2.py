@@ -222,7 +222,7 @@ def main():
                     num_err = num_err + 1
                     if num_err > (0.1 * len(utt_list)):
                         raise Exception("{0} is not a suitable length".format(this_length))
-                    break
+                    continue
                 else:
                     this_utt_boundary = int(this_utt_len - this_length)
                     for k in range(integral_part):
@@ -235,6 +235,7 @@ def main():
                         print("{0} {1}".format(new_utt_id, this_spk_id),
                             file=spk_f)
                     if ((random.randint(0,100)) * 1.0 /100.0) < decimal_part :
+                        start_point = random.randint(0, this_utt_boundary)
                         new_utt_id = "{0}-{1}-{2}".format(this_utt_id, start_point, this_length)
                         new_extend = "{0}[{1}:{2}]".format(this_extend, start_point,
                                 start_point+this_length-1)
