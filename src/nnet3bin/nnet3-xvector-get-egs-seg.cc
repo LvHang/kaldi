@@ -27,7 +27,7 @@ namespace nnet3 {
 // Process the utt2label file and store it as a map from utt_id to
 // label
 static void ProcessUttToLabelFile(const std::string &utt2label_rxfilename, 
-    unordered_map<std::string, int32, StringHasher> *utt_to_label) {
+                                  unordered_map<std::string, int32, StringHasher> *utt_to_label) {
   Input utt2label_input(utt2label_rxfilename);
   if (!utt2label_rxfilename.empty()) {
     std::string line;
@@ -51,10 +51,12 @@ static void ProcessUttToLabelFile(const std::string &utt2label_rxfilename,
 
 
 static void WriteExample(const MatrixBase<BaseFloat> &feats,
-  const int32 this_pdf_id, const std::string &key,
-  bool compress, int32 num_pdfs, int32 &num_egs_written,
-  NnetExampleWriter *example_writer) {
-
+                         const int32 this_pdf_id,
+                         const std::string &key,
+                         bool compress,
+                         int32 num_pdfs,
+                         int32 *num_egs_written,
+                         NnetExampleWriter *example_writer) {
   NnetIo nnet_input = NnetIo("input", 0, feats);
   for (std::vector<Index>::iterator indx_it = nnet_input.indexes.begin();
       indx_it != nnet_input.indexes.end(); ++indx_it) {
@@ -150,7 +152,7 @@ int main(int argc, char *argv[]) {
         int32 this_pdf_id = got_label->second;
         KALDI_ASSERT(this_pdf_id < num_pdfs);
         WriteExample(feats, this_pdf_id, key, compress, num_pdfs,
-            num_egs_written, &egs_writer);
+                     &num_egs_written, &egs_writer);
         num_done++;
       }
     }

@@ -32,7 +32,7 @@ done
 num_egs_per_speaker_per_length=$[$num_egs_per_speaker/$kinds_of_length_train]
 feat_dim=$(feat-to-dim scp:$data/feats.scp -) || exit 1;
 
-mkdir -p $dir/log $dir/info $dir/temp $data/train_set $data/valid_set $data/train_subset
+mkdir -p $dir/log $dir/info $dir/temp $dir/train_set/temp $dir/valid_set/temp $dir/train_subset/temp
 temp=$dir/temp
 
 echo $feat_dim > $dir/info/feat_dim
@@ -43,35 +43,35 @@ echo '1' > $dir/info/frames_per_eg
 if [ $stage -le 0 ]; then
   echo "$0: Preparing train and validation lists"
   # Pick a list of heldout utterances for validation egs
-  cat $data/utt2spk | utils/shuffle_list.pl | head -$num_heldout_utts > $data/valid_set/utt2spk || exit 1;
-  cp $data/valid_set/utt2spk $temp/uttlist_valid
-  utils/filter_scp.pl $data/valid_set/utt2spk $data/utt2num_frames > $data/valid_set/utt2num_frames
-  utils/filter_scp.pl $data/valid_set/utt2spk $data/feats.scp > $data/valid_set/feats.scp
+  cat $data/utt2spk | utils/shuffle_list.pl | head -$num_heldout_utts > $dir/valid_set/utt2spk || exit 1;
+  cp $dir/valid_set/utt2spk $temp/uttlist_valid
+  utils/filter_scp.pl $dir/valid_set/utt2spk $data/utt2num_frames > $dir/valid_set/utt2num_frames
+  utils/filter_scp.pl $dir/valid_set/utt2spk $data/feats.scp > $dir/valid_set/feats.scp
 
   # The remaining utterances are used for training egs
-  utils/filter_scp.pl --exclude $data/valid_set/utt2spk $data/utt2spk > $data/train_set/utt2spk
-  cp $data/train_set/utt2spk $temp/uttlist_train
-  utils/filter_scp.pl --exclude $data/valid_set/utt2spk $data/utt2num_frames > $data/train_set/utt2num_frames
-  utils/filter_scp.pl --exclude $data/valid_set/utt2spk $data/feats.scp > $data/train_set/feats.scp
+  utils/filter_scp.pl --exclude $dir/valid_set/utt2spk $data/utt2spk > $dir/train_set/utt2spk
+  cp $dir/train_set/utt2spk $temp/uttlist_train
+  utils/filter_scp.pl --exclude $dir/valid_set/utt2spk $data/utt2num_frames > $dir/train_set/utt2num_frames
+  utils/filter_scp.pl --exclude $dir/valid_set/utt2spk $data/feats.scp > $dir/train_set/feats.scp
 
   # Pick a subset of the training list for diagnostics
-  cat $data/train_set/utt2spk | utils/shuffle_list.pl | head -$num_heldout_utts > $data/train_subset/utt2spk || exit 1;
-  cp $data/train_subset/utt2spk $temp/uttlist_train_subset
-  utils/filter_scp.pl $temp/uttlist_train_subset <$data/utt2num_frames > $data/train_subset/utt2num_frames
-  utils/filter_scp.pl $temp/uttlist_train_subset <$data/feats.scp > $data/train_subset/feats.scp
+  cat $dir/train_set/utt2spk | utils/shuffle_list.pl | head -$num_heldout_utts > $dir/train_subset/utt2spk || exit 1;
+  cp $dir/train_subset/utt2spk $temp/uttlist_train_subset
+  utils/filter_scp.pl $temp/uttlist_train_subset <$data/utt2num_frames > $dir/train_subset/utt2num_frames
+  utils/filter_scp.pl $temp/uttlist_train_subset <$data/feats.scp > $dir/train_subset/feats.scp
 
   # Create a mapping from utterance to speaker ID (an integer)
-  awk -v id=0 '{print $1, id++}' $data/spk2utt > $data/spk2int
-  utils/sym2int.pl -f 2 $data/spk2int $data/utt2spk > $data/utt2int
-  utils/filter_scp.pl $data/train_set/utt2spk $data/utt2int > $data/train_set/utt2int
-  utils/filter_scp.pl $data/valid_set/utt2spk $data/utt2int > $data/valid_set/utt2int
-  utils/filter_scp.pl $data/train_subset/utt2spk $data/utt2int > $data/train_subset/utt2int
+  awk -v id=0 '{print $1, id++}' $data/spk2utt > $temp/spk2int
+  utils/sym2int.pl -f 2 $temp/spk2int $data/utt2spk > $temp/utt2int
+  utils/filter_scp.pl $dir/train_set/utt2spk $temp/utt2int > $dir/train_set/utt2int
+  utils/filter_scp.pl $dir/valid_set/utt2spk $temp/utt2int > $dir/valid_set/utt2int
+  utils/filter_scp.pl $dir/train_subset/utt2spk $temp/utt2int > $dir/train_subset/utt2int
   #Above, prepare the "utt2num_frames, utt2spk and utt2int" for each data set.
 fi
 
-num_pdfs=$(awk '{print $2}' $data/utt2int | sort | uniq -c | wc -l)
-num_train_set_frames=$(awk '{n += $2} END{print n}' <$data/train_set/utt2num_frames)
-num_train_subset_frames=$(awk '{n += $2} END{print n}' <$data/train_subset/utt2num_frames)
+num_pdfs=$(awk '{print $2}' $temp/utt2int | sort | uniq -c | wc -l)
+num_train_set_frames=$(awk '{n += $2} END{print n}' <$dir/train_set/utt2num_frames)
+num_train_subset_frames=$(awk '{n += $2} END{print n}' <$dir/train_subset/utt2num_frames)
 echo $num_train_set_frames > $dir/info/num_frames
 echo $num_pdfs > $dir/info/num_pdfs
 
@@ -85,7 +85,7 @@ if [ $stage -le 1 ]; then
       --max-frames-per-chunk=$max_frames_per_chunk \
       --kinds-of-length=$kinds_of_length_train \
       --num_egs_per_speaker_per_length=$num_egs_per_speaker_per_length \
-      --data-dir=$data/train_set \
+      --data-dir=$dir/train_set \
       --output-dir=$temp_dir || exit 1
   #sort and uniq
   for subdir in `dir $temp_dir`; do
@@ -185,7 +185,7 @@ if [ $stage -le 4 ]; then
       --kinds-of-length=$kinds_of_length_valid \
       --generate-validate=true \
       --randomize-chunk-length=false \
-      --data-dir=$data/valid_set \
+      --data-dir=$dir/valid_set \
       --output-dir=$temp_dir || exit 1
   #Generate data_li/spk2utt and utt2label
   for subdir in `dir $temp_dir`; do
@@ -229,7 +229,7 @@ if [ $stage -le 5 ]; then
       --kinds-of-length=$kinds_of_length_valid \
       --generate-validate=true \
       --randomize-chunk-length=false \
-      --data-dir=$data/train_subset \
+      --data-dir=$dir/train_subset \
       --output-dir=$temp_dir || exit 1
   #Generate data_li/spk2utt and utt2label
   for subdir in `dir $temp_dir`; do
