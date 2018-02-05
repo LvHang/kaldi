@@ -98,8 +98,6 @@ NnetIo::NnetIo(const std::string &name,
     indexes[i].t = t_begin + i * t_stride;
 }
 
-
-
 void NnetExample::Write(std::ostream &os, bool binary) const {
   // Note: weight, label, input_frames and spk_info are members.  This is a
   // struct.

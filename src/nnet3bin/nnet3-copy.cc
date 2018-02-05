@@ -108,6 +108,7 @@ int main(int argc, char *argv[]) {
     if (prepare_for_test) {
       SetBatchnormTestMode(true, &nnet);
       SetDropoutTestMode(true, &nnet);
+      SetShiftInputTestMode(true, &nnet);
       CollapseModel(CollapseModelConfig(), &nnet);
     }
     WriteKaldiObject(nnet, raw_nnet_wxfilename, binary_write);

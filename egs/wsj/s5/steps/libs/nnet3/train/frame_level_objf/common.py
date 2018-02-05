@@ -32,7 +32,8 @@ def train_new_models(dir, iter, srand, num_jobs,
                      run_opts, frames_per_eg=-1,
                      min_deriv_time=None, max_deriv_time_relative=None,
                      use_multitask_egs=False,
-                     backstitch_training_scale=0.0, backstitch_training_interval=1):
+                     backstitch_training_scale=0.0, backstitch_training_interval=1,
+                     regularize_factors=1.0):
     """ Called from train_one_iteration(), this model does one iteration of
     training with 'num_jobs' jobs, and writes files like
     exp/tdnn_a/24.{1,2,3,..<num_jobs>}.raw
@@ -44,16 +45,24 @@ def train_new_models(dir, iter, srand, num_jobs,
     but we use the same script for consistency with FF-DNN code
 
     Selected args:
-        frames_per_eg: The default value -1 implies chunk_level_training, which
-            is particularly applicable to RNN training. If it is > 0, then it
-            implies frame-level training, which is applicable for DNN training.
-            If it is > 0, then each parallel SGE job created, a different frame
-            numbered 0..frames_per_eg-1 is used.
+        frames_per_eg:
+            The frames_per_eg, in the context of (non-chain) nnet3 training,
+            is normally the number of output (supervised) frames in each training
+            example.  However, the frames_per_eg argument to this function should
+            only be set to that number (greater than zero) if you intend to
+            train on a single frame of each example, on each minibatch.  If you
+            provide this argument >0, then for each training job a different
+            frame from the dumped example is selected to train on, based on
+            the option --frame=n to nnet3-copy-egs.
+            If you leave frames_per_eg at its default value (-1), then the
+            entire sequence of frames is used for supervision.  This is suitable
+            for RNN training, where it helps to amortize the cost of computing
+            the activations for the frames of context needed for the recurrence.
         use_multitask_egs : True, if different examples used to train multiple
-                            tasks or outputs, e.g.multilingual training.
-                            multilingual egs can be generated using get_egs.sh and
-                            steps/nnet3/multilingual/allocate_multilingual_examples.py,
-                            those are the top-level scripts.
+            tasks or outputs, e.g.multilingual training.  multilingual egs can
+            be generated using get_egs.sh and
+            steps/nnet3/multilingual/allocate_multilingual_examples.py, those
+            are the top-level scripts.
     """
 
     chunk_level_training = False if frames_per_eg > 0 else True
@@ -128,13 +137,14 @@ def train_new_models(dir, iter, srand, num_jobs,
         thread = common_lib.background_command(
             """{command} {train_queue_opt} {dir}/log/train.{iter}.{job}.log \
                     nnet3-train {parallel_train_opts} {cache_io_opts} \
-                     {verbose_opt} --print-interval=10 \
+                     {verbose_opt} --print-interval=5 \
+                    --compiler.cache-capacity=256 \
                     --momentum={momentum} \
                     --max-param-change={max_param_change} \
                     --backstitch-training-scale={backstitch_training_scale} \
                     --l2-regularize-factor={l2_regularize_factor} \
                     --backstitch-training-interval={backstitch_training_interval} \
-                    --srand={srand} \
+                    --srand={srand} --regularize-factors={regularize_factors}\
                     {deriv_time_opts} "{raw_model}" "{egs_rspecifier}" \
                     {dir}/{next_iter}.{job}.raw""".format(
                 command=run_opts.command,
@@ -151,7 +161,8 @@ def train_new_models(dir, iter, srand, num_jobs,
                 backstitch_training_interval=backstitch_training_interval,
                 deriv_time_opts=" ".join(deriv_time_opts),
                 raw_model=raw_model_string,
-                egs_rspecifier=egs_rspecifier),
+                egs_rspecifier=egs_rspecifier,
+                regularize_factors=regularize_factors),
             require_zero_status=True)
 
         threads.append(thread)
@@ -170,8 +181,10 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                         shrinkage_value=1.0, dropout_edit_string="",
                         get_raw_nnet_from_am=True,
                         use_multitask_egs=False,
-                        backstitch_training_scale=0.0, backstitch_training_interval=1,
-                        compute_per_dim_accuracy=False):
+                        backstitch_training_scale=0.0,
+                        backstitch_training_interval=1,
+                        compute_per_dim_accuracy=False,
+                        regularize_factors=1.0):
     """ Called from steps/nnet3/train_*.py scripts for one iteration of neural
     network training
 
@@ -190,7 +203,7 @@ def train_one_iteration(dir, iter, srand, egs_dir,
 
     # Set off jobs doing some diagnostics, in the background.
     # Use the egs dir from the previous iteration for the diagnostics
-    logger.info("Training neural net (pass {0})".format(iter))
+    #logger.info("Training neural net (pass {0})".format(iter))
 
     # check if different iterations use the same random seed
     if os.path.exists('{0}/srand'.format(dir)):
@@ -270,9 +283,10 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                      image_augmentation_opts=image_augmentation_opts,
                      use_multitask_egs=use_multitask_egs,
                      backstitch_training_scale=backstitch_training_scale,
-                     backstitch_training_interval=backstitch_training_interval)
+                     backstitch_training_interval=backstitch_training_interval,
+                     regularize_factors=regularize_factors)
 
-    [models_to_average, best_model] = common_train_lib.get_successful_models(
+    [models_to_average, best_model, do_average_bkup] = common_train_lib.get_successful_models(
          num_jobs, '{0}/log/train.{1}.%.log'.format(dir, iter))
     nnets_list = []
     for n in models_to_average:
@@ -446,7 +460,8 @@ def combine_models(dir, num_iters, models_to_combine, egs_dir,
                    chunk_width=None, get_raw_nnet_from_am=True,
                    sum_to_one_penalty=0.0,
                    use_multitask_egs=False,
-                   compute_per_dim_accuracy=False):
+                   compute_per_dim_accuracy=False,
+                   regularize_factors="output:1.0"):
     """ Function to do model combination
 
     In the nnet3 setup, the logic
@@ -494,6 +509,7 @@ def combine_models(dir, num_iters, models_to_combine, egs_dir,
     common_lib.execute_command(
         """{command} {combine_queue_opt} {dir}/log/combine.log \
                 nnet3-combine --num-iters=80 \
+                --regularize-factors={regularize_factors} \
                 --enforce-sum-to-one={hard_enforce} \
                 --sum-to-one-penalty={penalty} \
                 --enforce-positive-weights=true \
@@ -510,7 +526,8 @@ def combine_models(dir, num_iters, models_to_combine, egs_dir,
                    penalty=sum_to_one_penalty,
                    mbsize=minibatch_size_str,
                    out_model=out_model,
-                   multitask_egs_opts=multitask_egs_opts))
+                   multitask_egs_opts=multitask_egs_opts,
+                   regularize_factors=regularize_factors))
 
     # Compute the probability of the final, combined model with
     # the same subset we used for the previous compute_probs, as the

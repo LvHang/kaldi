@@ -50,6 +50,7 @@ struct NnetCombineConfig {
   bool enforce_sum_to_one;
   BaseFloat sum_to_one_penalty;
   bool separate_weights_per_component;
+  std::string regularize_factors;
   NnetCombineConfig(): num_iters(60),
                        initial_impr(0.01),
                        max_effective_inputs(15),
@@ -57,7 +58,8 @@ struct NnetCombineConfig {
                        enforce_positive_weights(false),
                        enforce_sum_to_one(false),
                        sum_to_one_penalty(0.0),
-                       separate_weights_per_component(true) { }
+                       separate_weights_per_component(true),
+                       regularize_factors("output:1.0") { }
 
   void Register(OptionsItf *po) {
     po->Register("num-iters", &num_iters, "Maximum number of function "
@@ -83,6 +85,12 @@ struct NnetCombineConfig {
     po->Register("separate-weights-per-component", &separate_weights_per_component,
                  "If true, have a separate weight for each updatable component in "
                  "the nnet.");
+    po->Register("regularize-factors", &regularize_factors,
+                   "Comma-separated pairs of output-name and its regulazitation factor ."
+                   "as output-name:regularization-factor. "
+                   "e.g. output:1.0,output-regression:0.2 means "
+                   "reugularization factor 1.0 and 0.2 for classification and "
+                   "regression objective functions.");
   }
 };
 

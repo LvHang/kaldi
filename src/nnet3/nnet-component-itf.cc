@@ -105,6 +105,10 @@ Component* Component::NewComponentOfType(const std::string &component_type) {
     ans = new PnormComponent();
   } else if (component_type == "AffineComponent") {
     ans = new AffineComponent();
+  } else if (component_type == "LinearComponent") {
+    ans = new LinearComponent();
+  } else if (component_type == "SigmoidLinearComponent") {
+    ans = new SigmoidLinearComponent();
   } else if (component_type == "NaturalGradientAffineComponent") {
     ans = new NaturalGradientAffineComponent();
   } else if (component_type == "PerElementScaleComponent") {
@@ -163,10 +167,24 @@ Component* Component::NewComponentOfType(const std::string &component_type) {
     ans = new BatchNormComponent();
   } else if (component_type == "TimeHeightConvolutionComponent") {
     ans = new TimeHeightConvolutionComponent();
+  } else if (component_type == "TimeConvolutionComponent") {
+    ans = new TimeConvolutionComponent();
   } else if (component_type == "RestrictedAttentionComponent") {
     ans = new RestrictedAttentionComponent();
   } else if (component_type == "SumBlockComponent") {
     ans = new SumBlockComponent();
+  } else if (component_type == "ShiftInputComponent") {
+    ans = new ShiftInputComponent();
+  } else if (component_type == "LogComponent") {
+    ans = new LogComponent();
+  } else if (component_type == "ExpComponent") {
+    ans = new ExpComponent();
+  } else if (component_type == "PowerComponent") {
+    ans = new PowerComponent();
+  } else if (component_type == "GmmComponent") {
+    ans = new GmmComponent();
+  } else if (component_type == "ScaleAndOffsetComponent") {
+    ans = new ScaleAndOffsetComponent();
   }
   if (ans != NULL) {
     KALDI_ASSERT(component_type == ans->Type());
@@ -207,9 +225,23 @@ bool Component::IsComputable(const MiscComputationInfo &misc_info,
 UpdatableComponent::UpdatableComponent(const UpdatableComponent &other):
     learning_rate_(other.learning_rate_),
     learning_rate_factor_(other.learning_rate_factor_),
-    is_gradient_(other.is_gradient_),
     l2_regularize_(other.l2_regularize_),
+    min_param_value_(other.min_param_value_),
+    max_param_value_(other.max_param_value_),
+    is_gradient_(other.is_gradient_),
     max_change_(other.max_change_) { }
+
+
+void UpdatableComponent::SetUpdatableConfigs(
+    const UpdatableComponent &other) {
+  learning_rate_ = other.learning_rate_;
+  learning_rate_factor_ = other.learning_rate_factor_;
+  l2_regularize_ = other.l2_regularize_;
+  is_gradient_ = other.is_gradient_;
+  max_change_ = other.max_change_;
+  max_param_value_ = other.max_param_value_;
+  min_param_value_ = other.min_param_value_;
+}
 
 // If these defaults are changed, the defaults in the constructor that
 // takes no arguments should be changed too.
@@ -225,6 +257,13 @@ void UpdatableComponent::InitLearningRatesFromConfig(ConfigLine *cfl) {
   if (learning_rate_ < 0.0 || learning_rate_factor_ < 0.0 ||
       max_change_ < 0.0 || l2_regularize_ < 0.0)
     KALDI_ERR << "Bad initializer " << cfl->WholeLine();
+  BaseFloat min_param_value = std::numeric_limits<float>::lowest(),
+    max_param_value = std::numeric_limits<float>::max();
+  cfl->GetValue("min-param-value", &min_param_value);
+  cfl->GetValue("max-param-value", &max_param_value);
+  KALDI_ASSERT(min_param_value < max_param_value);
+  min_param_value_ = min_param_value;
+  max_param_value_ = max_param_value;
 }
 
 
@@ -263,6 +302,21 @@ std::string UpdatableComponent::ReadUpdatableCommon(std::istream &is,
   } else {
     l2_regularize_ = 0.0;
   }
+
+  if (token == "<MaxParamValue>") {
+    ReadBasicType(is, binary, &max_param_value_);
+    ReadToken(is, binary, &token);
+  } else {
+    max_param_value_ = std::numeric_limits<float>::max();
+  }
+
+  if (token == "<MinParamValue>") {
+    ReadBasicType(is, binary, &min_param_value_);
+    ReadToken(is, binary, &token);
+  } else {
+    min_param_value_ = std::numeric_limits<float>::lowest();
+  }
+
   if (token == "<LearningRate>") {
     ReadBasicType(is, binary, &learning_rate_);
     return "";
@@ -293,6 +347,18 @@ void UpdatableComponent::WriteUpdatableCommon(std::ostream &os,
     WriteToken(os, binary, "<L2Regularize>");
     WriteBasicType(os, binary, l2_regularize_);
   }
+
+  //if (max_param_value_ > min_param_value_) {
+  if (max_param_value_ < std::numeric_limits<float>::max()) {
+    WriteToken(os, binary, "<MaxParamValue>");
+    WriteBasicType(os, binary, max_param_value_);
+  }
+
+  if (min_param_value_ > std::numeric_limits<float>::lowest()) {
+    WriteToken(os, binary, "<MinParamValue>");
+    WriteBasicType(os, binary, min_param_value_);
+  }
+
   WriteToken(os, binary, "<LearningRate>");
   WriteBasicType(os, binary, learning_rate_);
 }
@@ -311,6 +377,9 @@ std::string UpdatableComponent::Info() const {
     stream << ", learning-rate-factor=" << learning_rate_factor_;
   if (max_change_ > 0.0)
     stream << ", max-change=" << max_change_;
+
+  stream << ", max-param-value=" << max_param_value_
+         << ", min-param-value=" << min_param_value_;
   return stream.str();
 }
 
@@ -318,6 +387,7 @@ void NonlinearComponent::StoreStatsInternal(
     const CuMatrixBase<BaseFloat> &out_value,
     const CuMatrixBase<BaseFloat> *deriv) {
   KALDI_ASSERT(out_value.NumCols() == InputDim());
+
   // Check we have the correct dimensions.
   if (value_sum_.Dim() != InputDim() ||
       (deriv != NULL && deriv_sum_.Dim() != InputDim())) {
@@ -358,7 +428,8 @@ std::string NonlinearComponent::Info() const {
     stream << Type() << ", input-dim=" << InputDim()
            << ", output-dim=" << OutputDim();
   }
-
+  if (block_dim_ != dim_)
+    stream << ", block-dim=" << block_dim_;
   if (self_repair_lower_threshold_ != BaseFloat(kUnsetThreshold))
     stream << ", self-repair-lower-threshold=" << self_repair_lower_threshold_;
   if (self_repair_upper_threshold_ != BaseFloat(kUnsetThreshold))
@@ -416,6 +487,12 @@ void NonlinearComponent::Read(std::istream &is, bool binary) {
   ostr_end << "</" << Type() << ">"; // e.g. "</SigmoidComponent>"
   ExpectOneOrTwoTokens(is, binary, ostr_beg.str(), "<Dim>");
   ReadBasicType(is, binary, &dim_); // Read dimension.
+  if (PeekToken(is, binary) == 'B') {
+    ExpectToken(is, binary, "<BlockDim>");
+    ReadBasicType(is, binary, &block_dim_);
+  } else {
+    block_dim_ = dim_;
+  }
   ExpectToken(is, binary, "<ValueAvg>");
   value_sum_.Read(is, binary);
   ExpectToken(is, binary, "<DerivAvg>");
@@ -460,6 +537,10 @@ void NonlinearComponent::Write(std::ostream &os, bool binary) const {
   WriteToken(os, binary, ostr_beg.str());
   WriteToken(os, binary, "<Dim>");
   WriteBasicType(os, binary, dim_);
+  if (block_dim_ != dim_) {
+    WriteToken(os, binary, "<BlockDim>");
+    WriteBasicType(os, binary, block_dim_);
+  }
   // Write the values and derivatives in a count-normalized way, for
   // greater readability in text form.
   WriteToken(os, binary, "<ValueAvg>");
@@ -494,14 +575,15 @@ void NonlinearComponent::Write(std::ostream &os, bool binary) const {
 }
 
 NonlinearComponent::NonlinearComponent():
-    dim_(-1), count_(0.0),
+    dim_(-1), block_dim_(-1), count_(0.0),
     num_dims_self_repaired_(0.0), num_dims_processed_(0.0),
     self_repair_lower_threshold_(kUnsetThreshold),
     self_repair_upper_threshold_(kUnsetThreshold),
     self_repair_scale_(0.0) { }
 
 NonlinearComponent::NonlinearComponent(const NonlinearComponent &other):
-    dim_(other.dim_), value_sum_(other.value_sum_), deriv_sum_(other.deriv_sum_),
+    dim_(other.dim_), block_dim_(other.block_dim_),
+    value_sum_(other.value_sum_), deriv_sum_(other.deriv_sum_),
     count_(other.count_),
     num_dims_self_repaired_(other.num_dims_self_repaired_),
     num_dims_processed_(other.num_dims_processed_),
@@ -511,10 +593,13 @@ NonlinearComponent::NonlinearComponent(const NonlinearComponent &other):
 
 void NonlinearComponent::InitFromConfig(ConfigLine *cfl) {
   bool ok = cfl->GetValue("dim", &dim_);
+  block_dim_ = dim_;
+  cfl->GetValue("block-dim", &block_dim_);
   cfl->GetValue("self-repair-lower-threshold", &self_repair_lower_threshold_);
   cfl->GetValue("self-repair-upper-threshold", &self_repair_upper_threshold_);
   cfl->GetValue("self-repair-scale", &self_repair_scale_);
-  if (!ok || cfl->HasUnusedValues() || dim_ <= 0)
+  if (!ok || cfl->HasUnusedValues() || dim_ <= 0 ||
+      block_dim_ <= 0 || dim_ % block_dim_ != 0)
     KALDI_ERR << "Invalid initializer for layer of type "
               << Type() << ": \"" << cfl->WholeLine() << "\"";
 }

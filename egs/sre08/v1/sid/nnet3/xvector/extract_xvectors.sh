@@ -19,7 +19,8 @@ chunk_size=-1 # The chunk size over which the embedding is extracted.
               # directory.
 use_gpu=false
 stage=0
-
+apply_exp=false
+extract_config=
 echo "$0 $@"  # Print the command line for logging
 
 if [ -f path.sh ]; then . ./path.sh; fi
@@ -50,9 +51,9 @@ min_chunk_size=`cat $srcdir/min_chunk_size 2>/dev/null`
 max_chunk_size=`cat $srcdir/max_chunk_size 2>/dev/null`
 
 nnet=$srcdir/final.raw
-if [ -f $srcdir/extract.config ] ; then
-  echo "$0: using $srcdir/extract.config to extract xvectors"
-  nnet="nnet3-copy --nnet-config=$srcdir/extract.config $srcdir/final.raw - |"
+if [ -f $srcdir/$extract_config ] ; then
+  echo "$0: using $srcdir/$extract.config to extract xvectors"
+  nnet="nnet3-copy --nnet-config=$srcdir/$extract_config $srcdir/final.raw - |"
 fi
 
 if [ $chunk_size -le 0 ]; then
@@ -77,13 +78,13 @@ if [ $stage -le 0 ]; then
   if $use_gpu; then
     for g in $(seq $nj); do
       $cmd --gpu 1 ${dir}/log/extract.$g.log \
-        nnet3-xvector-compute --use-gpu=yes --min-chunk-size=$min_chunk_size --chunk-size=$chunk_size \
+        nnet3-xvector-compute --use-gpu=yes --apply-exp=$apply_exp --min-chunk-size=$min_chunk_size --chunk-size=$chunk_size \
         "$nnet" "`echo $feat | sed s/JOB/$g/g`" ark,scp:${dir}/xvector.$g.ark,${dir}/xvector.$g.scp || exit 1 &
     done
     wait
   else
     $cmd JOB=1:$nj ${dir}/log/extract.JOB.log \
-      nnet3-xvector-compute --use-gpu=no --min-chunk-size=$min_chunk_size --chunk-size=$chunk_size \
+      nnet3-xvector-compute --use-gpu=no --apply-exp=$apply_exp --min-chunk-size=$min_chunk_size --chunk-size=$chunk_size \
       "$nnet" "$feat" ark,scp:${dir}/xvector.JOB.ark,${dir}/xvector.JOB.scp || exit 1;
   fi
 fi

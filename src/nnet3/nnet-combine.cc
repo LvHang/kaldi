@@ -48,6 +48,7 @@ NnetCombiner::NnetCombiner(const NnetCombineConfig &config,
   ComputeUpdatableComponentDims();
   NnetComputeProbOptions compute_prob_opts;
   compute_prob_opts.compute_deriv = true;
+  compute_prob_opts.regularize_factors = config_.regularize_factors;
   prob_computer_ = new NnetComputeProb(compute_prob_opts, nnet_);
 }
 

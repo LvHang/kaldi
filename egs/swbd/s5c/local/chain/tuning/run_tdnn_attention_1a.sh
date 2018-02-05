@@ -31,7 +31,13 @@ speed_perturb=true
 dir=exp/chain/tdnn_attend  # Note: _sp will get added to this if $speed_perturb == true.
 decode_iter=
 decode_nj=50
-
+# attention layer
+num_heads=15
+value_dim=80
+key_dim=40
+temp=1.0
+left_context=5
+right_context=5
 # training options
 num_epochs=4
 initial_effective_lrate=0.001
@@ -123,7 +129,7 @@ if [ $stage -le 12 ]; then
   echo "$0: creating neural net configs using the xconfig parser";
   num_targets=$(tree-info $treedir/tree |grep num-pdfs|awk '{print $2}')
   learning_rate_factor=$(echo "print 0.5/$xent_regularize" | python)
-
+  key_scale=$(echo "print $temp / ${key_dim}**0.5" | python)
   mkdir -p $dir/configs
   cat <<EOF > $dir/configs/network.xconfig
   input dim=100 name=ivector
@@ -141,7 +147,7 @@ if [ $stage -le 12 ]; then
   relu-batchnorm-layer name=tdnn4 input=Append(-3,0,3) dim=625
   relu-batchnorm-layer name=tdnn5 input=Append(-3,0,3) dim=625
   relu-batchnorm-layer name=tdnn6 input=Append(-3,0,3) dim=625
-  attention-relu-renorm-layer name=attention1 num-heads=15 value-dim=80 key-dim=40 num-left-inputs=5 num-right-inputs=2 time-stride=3
+  attention-relu-renorm-layer name=attention1 num-heads=$num_heads value-dim=$value_dim key-dim=$key_dim num-left-inputs=$left_context num-right-inputs=$right_context time-stride=3 key-scale=$key_scale
 
   ## adding the layers for chain branch
   relu-batchnorm-layer name=prefinal-chain input=attention1 dim=625 target-rms=0.5
@@ -213,7 +219,8 @@ if [ ! -z $decode_iter ]; then
 fi
 if [ $stage -le 15 ]; then
   rm $dir/.error 2>/dev/null || true
-  for decode_set in train_dev eval2000; do
+  #for decode_set in train_dev eval2000; do
+  for decode_set in train_dev rt03 eval2000;do
       (
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \
           --nj $decode_nj --cmd "$decode_cmd" $iter_opts \

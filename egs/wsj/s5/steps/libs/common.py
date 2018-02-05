@@ -18,7 +18,7 @@ import re
 import subprocess
 import sys
 import threading
-
+import numpy as np
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 

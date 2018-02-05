@@ -18,7 +18,7 @@ remove_egs=false
 data=data/train
 nnet_dir=exp/xvector_nnet_1a/
 egs_dir=exp/xvector_nnet_1a/egs
-
+num_repeats=35
 . ./path.sh
 . ./cmd.sh
 . ./utils/parse_options.sh
@@ -65,7 +65,7 @@ if [ $stage -le 4 ]; then
     --min-frames-per-chunk 200 \
     --max-frames-per-chunk 400 \
     --num-diagnostic-archives 3 \
-    --num-repeats 35 \
+    --num-repeats $num_repeats \
     "$data" $egs_dir
 fi
 

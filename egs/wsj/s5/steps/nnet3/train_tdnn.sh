@@ -16,8 +16,8 @@
 cmd=run.pl
 num_epochs=15      # Number of epochs of training;
                    # the number of iterations is worked out from this.
-initial_effective_lrate=0.01
-final_effective_lrate=0.001
+initial_effective_lrate=0.001
+final_effective_lrate=0.0001
 pnorm_input_dim=3000
 pnorm_output_dim=300
 relu_dim=  # you can use this to make it use ReLU's instead of p-norms.

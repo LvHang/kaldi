@@ -238,28 +238,69 @@ def main():
     info_f = open(args.egs_dir + "/temp/" + prefix + "archive_chunk_lengths", "w")
     if info_f is None:
         sys.exit(str("Error opening file {0}/temp/" + prefix + "archive_chunk_lengths").format(args.egs_dir));
+    frames_per_utt_sum = 0.0;
+
+    # we need to check if the mean + stddev of utt lengthes are larger than
+    # max chunk length, otherwise some archives are empty.
+    # also min_chunk_length should not be less than mean - stddev.
+    utt_len = float(max(len(utt2len), 1))
+    for utt in utt2len:
+        frames_per_utt_sum = frames_per_utt_sum + utt2len[utt]
+    avg_frames_per_utt = frames_per_utt_sum / utt_len
+    frames_per_utt_sum_sqrt = 0.0
+    for utt in utt2len:
+        frames_per_utt_sum_sqrt = frames_per_utt_sum_sqrt + (utt2len[utt] - avg_frames_per_utt)**2
+    std_frames_per_utt = (frames_per_utt_sum_sqrt / (utt_len - 1.0))**0.5
+    max_frames_per_chunk = int(min(args.max_frames_per_chunk, avg_frames_per_utt + 0.5 * std_frames_per_utt))
+    min_frames_per_chunk = int(min(args.min_frames_per_chunk, avg_frames_per_utt - 0.5 * std_frames_per_utt))
+
+    assert(max_frames_per_chunk > min_frames_per_chunk)
+    if (max_frames_per_chunk < args.max_frames_per_chunk):
+        print("max-frame-per-chunk {0} is larger than avg + 0.5 stddev for frames per utterances"
+              " and smaller max-frame-per-chunk {1} is used for egs generation."
+              "".format(args.max_frames_per_chunk,
+                        max_frames_per_chunk))
     for archive_index in range(args.num_archives):
         print("Processing archive {0}".format(archive_index + 1))
+
         if args.randomize_chunk_length == "true":
             # don't constrain the lengths to be the same
-            length = random_chunk_length(args.min_frames_per_chunk, args.max_frames_per_chunk)
+            length = random_chunk_length(min_frames_per_chunk, max_frames_per_chunk)
         else:
-            length = deterministic_chunk_length(archive_index, args.num_archives, args.min_frames_per_chunk, args.max_frames_per_chunk);
+            length = deterministic_chunk_length(archive_index, args.num_archives, min_frames_per_chunk, max_frames_per_chunk);
         print("{0} {1}".format(archive_index + 1, length), file=info_f)
         archive_chunk_lengths.append(length)
         this_num_egs = int((args.frames_per_iter / length) + 1)
+        print("this-num-egs for archive {0} is {1}".format(archive_index, this_num_egs))
         this_egs = [ ] # A 2-tuple of the form (utt-id, start-frame)
-        spkrs = args.num_repeats * list(spk2utt.keys())
+        # num_repeats used in get_egs.sh is equal to number of repeats for each class (spk, age)
+        # during training and num_archives * frame_per_iter = num_train_frames * num_repeats
+        # num_repeats in allocate_egs.py has different definition and it is equivalent to
+        # number of repeats for each class in each archive.
+        # To use (num_train_frames * num_repeats) frames of speech during training, each archive
+        # should have this_num_egs.
+        # In spk ID task, num_spk * num_repeats >> this_num_egs and
+        # this_num_egs is written within each archive, but in language ID or age ID tasks,
+        # num_egs in each archive is num_classes * num_repeats.
+        # We change num_repeats to be max(num_repeats, this_num_egs/num_class) to solve this issue.
+        suggested_num_repeats = int(this_num_egs / len(spk2utt.keys()))
+        print("Suggested num_repeats is {0} to have {1} egs per archive, and --num-repeats={2}.".format(
+            suggested_num_repeats, this_num_egs, args.num_repeats))
+        num_repeats = max(args.num_repeats, suggested_num_repeats)
+        spkrs = num_repeats * list(spk2utt.keys())
         random.shuffle(spkrs)
         for n in range(this_num_egs):
             if len(spkrs) == 0:
-                print("Ran out of speakers for archive {0}".format(archive_index + 1))
+                print("Ran out of speakers for archive {0} after processing {1} out of {2}".format(archive_index + 1, n, this_num_egs))
                 break
             spkr = spkrs.pop()
             utt = get_random_utt(spkr, spk2utt, length)
             utt_len = utt2len[utt]
-            offset = get_random_offset(utt_len, length)
-            this_egs.append( (utt, offset) )
+            if utt_len > length:
+                offset = get_random_offset(utt_len, length)
+                this_egs.append( (utt, offset) )
+            else:
+                spkrs.append(spkr)
         all_egs.append(this_egs)
     info_f.close()
 

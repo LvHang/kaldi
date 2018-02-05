@@ -90,14 +90,14 @@ int main(int argc, char *argv[]) {
         cross_prod.Resize(Dim);
         similarity_metric.Resize(Dim);
       }
-      
+      int32 num_rows = std::min(feat1.NumRows(), feat2.NumRows());
       Vector<BaseFloat> feat1_col(feat1.NumRows()), feat2_col(feat2.NumRows());
       for (MatrixIndexT i = 0; i < feat1.NumCols(); i++){
         feat1_col.CopyColFromMat(feat1, i);
         feat2_col.CopyColFromMat(feat2, i);
         prod1(i) += VecVec(feat1_col, feat1_col);
         prod2(i) += VecVec(feat2_col, feat2_col);
-        cross_prod(i) += VecVec(feat1_col, feat2_col);
+        cross_prod(i) += VecVec(feat1_col.Range(0, num_rows), feat2_col.Range(0, num_rows));
       }
       num_done++;
     }

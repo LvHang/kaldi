@@ -39,6 +39,8 @@ int main(int argc, char *argv[]) {
     bool binary = true;
     int32 change_dim = -1;
     float scale = 1.0;
+    bool apply_exp = false,
+      apply_log = false;
     ParseOptions po(usage);
 
     po.Register("binary", &binary, "Write in binary mode (only "
@@ -47,7 +49,10 @@ int main(int argc, char *argv[]) {
                 "Use this option to truncate or zero-pad the vectors.");
     po.Register("scale", &scale,
                 "This option can be used to scale the vectors being copied.");
-
+    po.Register("apply-exp", &apply_exp,
+                "If true, exp is applied on output vector.");
+    po.Register("apply-log", &apply_log,
+                "If true, log is applied on the output vector.");
     po.Read(argc, argv);
 
     if (po.NumArgs() != 2) {
@@ -85,7 +90,14 @@ int main(int argc, char *argv[]) {
       SequentialBaseFloatVectorReader reader(vector_in_fn);
       if (change_dim < 0 && scale == 1.0) {
         for (; !reader.Done(); reader.Next(), num_done++) {
-          writer.Write(reader.Key(), reader.Value());
+          Vector<BaseFloat> vec(reader.Value());
+          if (apply_exp)
+            vec.ApplyExp();
+          if (apply_log) {
+            vec.ApplyFloor(1e-20);
+            vec.ApplyLog();
+          }
+          writer.Write(reader.Key(), vec);
         }
         KALDI_LOG << "Copied " << num_done << " vectors.";
       } else {
@@ -93,7 +105,7 @@ int main(int argc, char *argv[]) {
           Vector<BaseFloat> vec(reader.Value());
           if (change_dim >= 0) vec.Resize(change_dim, kCopyData);
           if (scale != 1.0) vec.Scale(scale);
-          writer.Write(reader.Key(), reader.Value());
+          writer.Write(reader.Key(), vec);
         }
         KALDI_LOG << "Copied " << num_done << " vectors, setting dim to "
                   << change_dim << " scaled by " << scale;

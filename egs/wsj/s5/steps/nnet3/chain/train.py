@@ -70,6 +70,17 @@ def get_args():
                         without the log-softmax layer for the outputs.  As
                         l2-norm of the log-softmax outputs can dominate the
                         objective function.""")
+    parser.add_argument("--chain.l1-regularize", type=float,
+                        dest='l1_regularize', default=0.0,
+                        help="""Weight of regularization function which is the
+                        l1-norm of the fft transform of convolution filters in
+                        the network.""")
+    parser.add_argument("--chain.fft-feat-dim", type=int,
+                        dest='fft_feat_dim', default=0,
+                        help="""If nonzero, the cosine and sine transformation
+                        with dim fft_feat_dim and closest 2-power of that is
+                        generated as configs/{cos,sin}_transform.mat.
+                        """)
     parser.add_argument("--chain.xent-regularize", type=float,
                         dest='xent_regularize', default=0.0,
                         help="Weight of regularization function which is the "
@@ -165,6 +176,13 @@ def get_args():
                         input data. E.g. 8 is a reasonable setting. Note: the
                         'required' part of the chunk is defined by the model's
                         {left,right}-context.""")
+    parser.add_argument("--trainer.iter-to-average", type=int, default=0,
+                        dest="iter_to_average",
+                        help="""The model are averaged for iterations larger than
+                                this value, otherwise, the
+                                best model selected and minibatch-size
+                                and max-param-change is 1/2 and 1/sqrt(2)
+                                of the original values.""")
 
     # General options
     parser.add_argument("--feat-dir", type=str, required=True,
@@ -412,11 +430,9 @@ def train(args, run_opts):
             args.dir, egs_dir, num_archives, run_opts,
             max_lda_jobs=args.max_lda_jobs,
             rand_prune=args.rand_prune)
-    
     if (args.l1_regularize != 0) or (args.fft_feat_dim != 0):
         feat_dim = args.fft_feat_dim
         add_bias = True
-        #feat_dim=250
         num_fft_bins = (2**(feat_dim-1).bit_length())
         common_lib.write_sin_cos_transform_matrix(feat_dim, num_fft_bins,
             "{0}/configs/cos_transform.mat".format(args.dir),
@@ -429,7 +445,6 @@ def train(args, run_opts):
         preemph = 0.97
         common_lib.compute_and_write_preprocess_transform(preemph, feat_dim,
             "{0}/configs/preprocess.mat".format(args.dir))
-    
     if (args.stage <= -1):
         logger.info("Preparing the initial acoustic model.")
         chain_lib.prepare_initial_acoustic_model(args.dir, run_opts,
@@ -463,14 +478,35 @@ def train(args, run_opts):
         min_deriv_time = -args.deriv_truncate_margin - model_left_context
         max_deriv_time_relative = \
            args.deriv_truncate_margin + model_right_context
-
     logger.info("Training will run for {0} epochs = "
                 "{1} iterations".format(args.num_epochs, num_iters))
-
     for iter in range(num_iters):
         if (args.exit_stage is not None) and (iter == args.exit_stage):
             logger.info("Exiting early due to --exit-stage {0}".format(iter))
             return
+        do_average = (iter > args.iter_to_average)
+        edits_config = "{0}/configs/edit.{1}.config".format(args.dir, iter)
+        nnet_config = "{0}/configs/nnet.{1}.config".format(args.dir, iter)
+        if (os.path.exists(edits_config) or os.path.exists(nnet_config)) and args.stage <= iter:
+            logger.info("edditing model using edit.{0}.config and nnet.{0}.config".format(iter))
+            edit_config_str = ('--edits-config={0}'.format(edits_config) if
+                os.path.exists(edits_config) else '')
+            nnet_config_str = ('--nnet-config={0}'.format(nnet_config) if
+                os.path.exists(nnet_config) else '')
+
+            shutil.copy2('{0}/{1}.mdl'.format(args.dir, iter), '{0}/{1}.mdl.bkup'.format(args.dir, iter))
+            common_lib.execute_command(
+            """{command} {dir}/log/edit.{iter}.mdl.log \
+            nnet3-am-copy {nnet_config} {edit_config} {dir}/{iter}.mdl.bkup \
+            {dir}/{iter}.mdl""".format(command=run_opts.command, dir=args.dir,
+                                 nnet_config=nnet_config_str,
+                                 edit_config=edit_config_str,
+                                 iter=iter))
+            os.remove('{0}/{1}.mdl.bkup'.format(args.dir, iter))
+            if os.path.exists("{0}/cache.{1}".format(args.dir, iter)):
+                os.remove('{0}/cache.{1}'.format(args.dir, iter))
+            do_average = False
+
         current_num_jobs = int(0.5 + args.num_jobs_initial
                                + (args.num_jobs_final - args.num_jobs_initial)
                                * float(iter) / num_iters)
@@ -536,7 +572,8 @@ def train(args, run_opts):
                 frame_subsampling_factor=args.frame_subsampling_factor,
                 run_opts=run_opts,
                 backstitch_training_scale=args.backstitch_training_scale,
-                backstitch_training_interval=args.backstitch_training_interval)
+                backstitch_training_interval=args.backstitch_training_interval,
+                do_average=do_average)
 
             if args.cleanup:
                 # do a clean up everythin but the last 2 models, under certain

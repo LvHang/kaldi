@@ -40,13 +40,13 @@ struct NnetCombineConfig {
   // BFGS.  We actually implement this as L-BFGS but setting the number of
   // vectors to be the same as the dimension of the space.  Note: this
   // num-iters is in reality the number of function evaluations.
-  
+
   BaseFloat initial_impr;
   bool test_gradient;
   NnetCombineConfig(): initial_model(-1), num_bfgs_iters(30),
                        initial_impr(0.01),
                        test_gradient(false) { }
-  
+
   void Register(OptionsItf *opts) {
     opts->Register("initial-model", &initial_model, "Specifies where to start the "
                    "optimization from.  If 0 ... #models-1, then specifies the model; "
@@ -58,14 +58,14 @@ struct NnetCombineConfig {
                    "we aim for on the first iteration.");
     opts->Register("test-gradient", &test_gradient, "If true, activate code that "
                    "tests the gradient is accurate.");
-  }  
+  }
 };
 
 void CombineNnets(const NnetCombineConfig &combine_config,
                   const std::vector<NnetExample> &validation_set,
                   const std::vector<Nnet> &nnets_in,
                   Nnet *nnet_out);
-  
+
 
 
 } // namespace nnet2

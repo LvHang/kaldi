@@ -3,6 +3,7 @@
 . ./cmd.sh
 set -e
 
+stage=4
 train_stage=-10
 data=data/train_clean_5
 noise_data=data/noise
@@ -13,7 +14,7 @@ fvector_dir=exp/fvector
 . ./cmd.sh
 . ./utils/parse_options.sh
 
-if [ $train_stage -le 2 ]; then
+if [ $stage -le 3 ]; then
   #dump egs                                         
   if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d $egs_dir/storage ]; then  
     utils/create_split_dir.pl \
@@ -31,9 +32,29 @@ fi
 
 if [ $stage -le 4 ]; then
   #prepare configs
-fi
+  echo "$0: creating neural net configs using the xconfig parser";
+  #options
+  num_filters=100
 
-if [ $train_stage -le 5 ]; then
+  mkdir -p $fvector_dir/configs
+
+  cat <<EOF > $fvector_dir/configs/network.xconfig
+  input dim=400 name=input
+
+  # Each eg contains 8 frames, do Frequency-domain feature learning, and then
+  # use TDNN model split it into one vector
+  preprocess-fft-abs2-lognorm-affine-log-layer name=raw0 cos-transform-file=$fvector_dir/configs/cos_transform.mat sin-transform-file=$fvector_dir/configs/sin_transform.mat num-filters=$num_filters dim=400 half-fft-range=true
+  relu-batchnorm-layer name=tdnn1 input=Append(-1,0,1) dim=625
+  relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1) dim=625
+  relu-batchnorm-layer name=tdnn3 input=Append(-1,0,1) dim=625
+  relu-batchnorm-layer name=tdnn4 input=Append(-1,0) dim=625
+  output-layer name=output input=tdnn4
+EOF
+  steps/nnet3/xconfig_to_configs.py --xconfig-file $fvector_dir/configs/network.xconfig --config-dir $fvector_dir/configs/
+fi
+exit 0
+
+if [ $stage -le 5 ]; then
   #training
   steps/nnet3/xvector/train.sh --cmd "$train_cmd" \                             
     --initial-effective-lrate 0.002 \                                         

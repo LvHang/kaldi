@@ -98,6 +98,21 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
                                      NnetComputer *computer) {
   std::vector<NnetIo>::const_iterator iter = eg.io.begin(),
       end = eg.io.end();
+
+  //regularize_factors is comma-separated list of output:reg values.
+  // split the regularize_str, which maps output name to regularizer.
+  std::string regularize_str = config_.regularize_factors;
+  std::vector<std::string> outputs_vs_regs;
+  SplitStringToVector(regularize_str, ",", true, &outputs_vs_regs);
+  std::map<std::string, BaseFloat> output_to_reg;
+  for (int32 n = 0; n < outputs_vs_regs.size(); n++) {
+    std::vector<std::string> output_vs_reg;
+    SplitStringToVector(outputs_vs_regs[n], ":", true, &output_vs_reg);
+    KALDI_ASSERT(output_vs_reg.size() == 2); // output_name:output_reg
+    BaseFloat reg_value = std::stof(output_vs_reg[1]);
+    output_to_reg[output_vs_reg[0]] = reg_value;
+  }
+
   for (; iter != end; ++iter) {
     const NnetIo &io = *iter;
     int32 node_index = nnet_.GetNodeIndex(io.name);
@@ -106,6 +121,9 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
     ObjectiveType obj_type = nnet_.GetNode(node_index).u.objective_type;
     if (nnet_.IsOutputNode(node_index)) {
       const CuMatrixBase<BaseFloat> &output = computer->GetOutput(io.name);
+      BaseFloat regularize = 1.0;
+      if (output_to_reg.find(io.name) != output_to_reg.end())
+        regularize = output_to_reg[io.name];
       if (output.NumCols() != io.features.NumCols()) {
         KALDI_ERR << "Nnet versus example output dimension (num-classes) "
                   << "mismatch for '" << io.name << "': " << output.NumCols()
@@ -116,7 +134,7 @@ void NnetComputeProb::ProcessOutputs(const NnetExample &eg,
         bool supply_deriv = config_.compute_deriv;
         ComputeObjectiveFunction(io.features, obj_type, io.name,
                                  supply_deriv, computer,
-                                 &tot_weight, &tot_objf);
+                                 &tot_weight, &tot_objf,regularize);
         SimpleObjectiveInfo &totals = objf_info_[io.name];
         totals.tot_weight += tot_weight;
         totals.tot_objective += tot_objf;

@@ -444,7 +444,7 @@ void ConvolutionComputation::Check() const {
 // Note: the number of time steps covered may be different
 // from that implied by cc.num_t_in and cc.num_t_out
 // if the matrices are very large and we've broken the
-// computation up into pieces to save memoiry.
+// computation up into pieces to save memory.
 static void ConvolveForwardInternal(
     const ConvolutionComputation &cc,
     const CuMatrixBase<BaseFloat> &input,
@@ -1096,6 +1096,51 @@ void PadComputationInputTime(const ConvolutionModel &model,
     io->num_t_in += (last_desired_input_t - last_input_t) / io->t_step_in;
   }
 }
+
+
+// see comment in header for what this does.
+void PadComputationIoSpecial(int32 frames_left_context,
+                             int32 frames_right_context,
+                             ConvolutionComputationIo *io) {
+  KALDI_ASSERT(frames_left_context >= 0 && frames_right_context >= 0);
+
+  // fill in any gaps in the output, make it contiguous.
+  if (io->t_step_out == 0) {
+    KALDI_ASSERT(io->num_t_out == 1);
+    io->t_step_out = 1;
+  } else {
+    io->num_t_out *= io->t_step_out;
+    io->num_t_out -= (io->t_step_out - 1);
+    io->t_step_out = 1;
+  }
+  // fill in any gaps in the input, make it contiguous.
+  if (io->t_step_in == 0) {
+    KALDI_ASSERT(io->num_t_in == 1);
+    io->t_step_in = 1;
+  } else {
+    io->num_t_in *= io->t_step_in;
+    io->num_t_in -= (io->t_step_in - 1);
+    io->t_step_in = 1;
+  }
+  KALDI_ASSERT(io->start_t_in <= io->start_t_out);
+  // the following two statements use the fact that the t_steps are both 1.
+  int32 last_t_in = io->start_t_in + io->num_t_in - 1;
+  int32 last_t_out = io->start_t_out + io->num_t_out - 1;
+  KALDI_ASSERT(io->start_t_in <= io->start_t_out &&
+               last_t_in >= last_t_out);
+  int32 input_left_padding =
+      frames_left_context - (io->start_t_out - io->start_t_in),
+      input_right_padding =
+      frames_right_context - (last_t_in - last_t_out);
+  // the following assert is based on knowledge of how this function
+  // is called in practice.
+  KALDI_ASSERT(input_left_padding >= 0 && input_right_padding >= 0);
+  // the following two statements ensure that there is enough left and right
+  // context.
+  io->start_t_in -= input_left_padding;
+  io->num_t_in += (input_left_padding + input_right_padding);
+}
+
 
 // returns i rounded down to a multiple of n,
 // e.g. RoundDownToMultipleOf(3, 2) = 2,

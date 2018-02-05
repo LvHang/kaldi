@@ -41,7 +41,9 @@ int main(int argc, char *argv[]) {
     bool binary = true;
     bool htk_in = false;
     bool sphinx_in = false;
-    bool compress = false;
+    bool compress = false,
+      apply_exp = false,
+      apply_log = false;
     int32 compression_method_in = 1;
     std::string num_frames_wspecifier;
     po.Register("htk-in", &htk_in, "Read input as HTK features");
@@ -55,6 +57,10 @@ int main(int argc, char *argv[]) {
                 "Only relevant if --compress=true; the method (1 through 7) to "
                 "compress the matrix.  Search for CompressionMethod in "
                 "src/matrix/compressed-matrix.h.");
+    po.Register("apply-exp", &apply_exp,
+                "If true, exp is applied on output vector.");
+    po.Register("apply-log", &apply_log,
+                "If true, log is applied on the output vector.");
     po.Register("write-num-frames", &num_frames_wspecifier,
                 "Wspecifier to write length in frames of each utterance. "
                 "e.g. 'ark,t:utt2num_frames'.  Only applicable if writing tables, "
@@ -160,6 +166,14 @@ int main(int argc, char *argv[]) {
         KALDI_ERR << "For single files, sphinx input is not yet supported.";
       } else {
         ReadKaldiObject(feat_rxfilename, &feat_matrix);
+      }
+
+      if (apply_exp) {
+        feat_matrix.ApplyExp();
+      }
+      if (apply_log) {
+        feat_matrix.ApplyFloor(1e-20);
+        feat_matrix.ApplyLog();
       }
       WriteKaldiObject(feat_matrix, feat_wxfilename, binary);
       KALDI_LOG << "Copied features from " << PrintableRxfilename(feat_rxfilename)

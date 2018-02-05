@@ -187,6 +187,7 @@ def main():
     CopyFileIfExists(args.utt_suffix, "text", input_dir, output_dir)
     CopyFileIfExists(args.utt_suffix, "utt2spk", input_dir, output_dir)
     CopyFileIfExists(args.utt_suffix, "vad.scp", input_dir, output_dir)
+    CopyFileIfExists(args.utt_suffix, "utt2age", input_dir, output_dir)
     CopyFileIfExists("", "spk2gender", input_dir, output_dir)
     data_lib.RunKaldiCommand("utils/fix_data_dir.sh {output_dir}".format(output_dir = output_dir))
 

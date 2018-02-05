@@ -108,12 +108,15 @@ static void WriteExamples(const MatrixBase<BaseFloat> &feats,
         indx_it->n = 0;
 
       Posterior label;
+      Matrix<BaseFloat> label_mat(1,1);
+      label_mat(0,0) = chunk->label;
       std::vector<std::pair<int32, BaseFloat> > post;
       post.push_back(std::pair<int32, BaseFloat>(chunk->label, 1.0));
       label.push_back(post);
       NnetExample eg;
       eg.io.push_back(nnet_input);
       eg.io.push_back(NnetIo("output", num_pdfs, 0, label));
+      eg.io.push_back(NnetIo("output-regression", 0, label_mat));
       if (compress)
         eg.Compress();
 

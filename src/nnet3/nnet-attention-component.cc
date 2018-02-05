@@ -48,10 +48,17 @@ std::string RestrictedAttentionComponent::Info() const {
     stream << ", entropy=";
     for (int32 i = 0; i < entropy_stats_.Dim(); i++)
       stream << (entropy_stats_(i) / stats_count_) << ',';
-    for (int32 i = 0; i < num_heads_ && i < 5; i++) {
-      stream << " posterior-stats[" << i <<"]=";
-      for (int32 j = 0; j < posterior_stats_.NumCols(); j++)
-        stream << (posterior_stats_(i,j) / stats_count_) << ',';
+      stream << "\n";
+    if (GetVerboseLevel() > 0) {
+      CuMatrix<BaseFloat> scaled_posterior_stats(posterior_stats_);
+      scaled_posterior_stats.Scale(1.0 / stats_count_);
+      stream << " posterior-stats=" << scaled_posterior_stats;
+    } else {
+      for (int32 i = 0; i < num_heads_ && i < 5; i++) {
+        stream << " posterior-stats[" << i <<"]=";
+        for (int32 j = 0; j < posterior_stats_.NumCols(); j++)
+          stream << (posterior_stats_(i,j) / stats_count_) << ',';
+      }
     }
     stream << " stats-count=" << stats_count_;
   }

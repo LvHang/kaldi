@@ -101,12 +101,13 @@ def get_multitask_egs_opts(egs_dir, egs_prefix="",
 
 
 def get_successful_models(num_models, log_file_pattern,
-                          difference_threshold=1.0):
+                          difference_threshold=1.0,
+                          min_acceptable_obj_for_average=-1000.0):
     assert num_models > 0
-
+    do_average = True
     parse_regex = re.compile(
         "LOG .* Overall average objective function for "
-        "'output' is ([0-9e.\-+= ]+) over ([0-9e.\-+]+) frames")
+        "'output' is ([0-9e.\-+= ]+) over ([0-9e.\-+]+) frames.")
     objf = []
     for i in range(num_models):
         model_num = i + 1
@@ -123,6 +124,9 @@ def get_successful_models(num_models, log_file_pattern,
         objf.append(this_objf)
     max_index = objf.index(max(objf))
     accepted_models = []
+    if objf[max_index] <  min_acceptable_obj_for_average:
+        do_average = False
+
     for i in range(num_models):
         if (objf[max_index] - objf[i]) <= difference_threshold:
             accepted_models.append(i + 1)
@@ -133,7 +137,7 @@ def get_successful_models(num_models, log_file_pattern,
                         len(accepted_models),
                         num_models, log_file_pattern))
 
-    return [accepted_models, max_index + 1]
+    return [accepted_models, max_index + 1, do_average]
 
 
 def get_average_nnet_model(dir, iter, nnets_list, run_opts,
@@ -398,6 +402,8 @@ def verify_egs_dir(egs_dir, feat_dim, ivector_dim, ivector_extractor_id,
         try:
             egs_ivector_id = open('{0}/info/final.ie.id'.format(
                                         egs_dir)).readline().strip()
+            if (egs_ivector_id == ""):
+                egs_ivector_id = None;
         except:
             # it could actually happen that the file is not there
             # for example in cases where the egs were dumped by
@@ -433,10 +439,12 @@ def verify_egs_dir(egs_dir, feat_dim, ivector_dim, ivector_extractor_id,
 
         if (((egs_ivector_id is None) and (ivector_extractor_id is not None)) or
             ((egs_ivector_id is not None) and (ivector_extractor_id is None))):
-            logger.warning("The ivector ids are inconsistently used. It's your "
+            logger.warning("The ivector ids are used inconsistently. It's your "
                           "responsibility to make sure the ivector extractor "
                           "has been used consistently")
-        elif ((egs_ivector_id is None) and (ivector_extractor_id is None)):
+            logger.warning("ivector id for egs: {0} in dir {1}".format(egs_ivector_id, egs_dir))
+            logger.warning("ivector id for extractor: {0}".format(ivector_extractor_id))
+        elif ((egs_ivector_dim > 0) and (egs_ivector_id is None) and (ivector_extractor_id is None)):
             logger.warning("The ivector ids are not used. It's your "
                           "responsibility to make sure the ivector extractor "
                           "has been used consistently")
@@ -532,7 +540,7 @@ def smooth_presoftmax_prior_scale_vector(pdf_counts,
 
 
 def prepare_initial_network(dir, run_opts, srand=-3):
-    if os.path.exists(dir+"/configs/init.config"):
+    if os.path.exists(dir+"/init.raw"):
         common_lib.execute_command(
             """{command} {dir}/log/add_first_layer.log \
                     nnet3-init --srand={srand} {dir}/init.raw \

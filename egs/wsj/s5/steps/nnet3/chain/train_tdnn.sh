@@ -15,14 +15,14 @@
 
 # Begin configuration section.
 cmd=run.pl
-num_epochs=10      # Number of epochs of training;
+num_epochs=4       # Number of epochs of training;
                    # the number of iterations is worked out from this.
                    # Be careful with this: we actually go over the data
                    # num-epochs * frame-subsampling-factor times, due to
                    # using different data-shifts.
 apply_deriv_weights=true
-initial_effective_lrate=0.0002
-final_effective_lrate=0.00002
+initial_effective_lrate=0.001
+final_effective_lrate=0.0001
 extra_left_context=0  # actually for recurrent setups.
 pnorm_input_dim=3000
 pnorm_output_dim=300
@@ -33,26 +33,26 @@ jesus_opts=  # opts to steps/nnet3/make_jesus_configs.py.
              # and you should supply various options to that script in
              # this string.
 rand_prune=4.0 # Relates to a speedup we do for LDA.
-minibatch_size=512  # This default is suitable for GPU-based training.
+minibatch_size=64  # This default is suitable for GPU-based training.
                     # Set it to 128 for multi-threaded CPU-based training.
 lm_opts=   # options to chain-est-phone-lm
-l2_regularize=0.0
-leaky_hmm_coefficient=0.00001
-xent_regularize=0.0
+l2_regularize=0.00005
+leaky_hmm_coefficient=0.1
+xent_regularize=0.1
 frames_per_iter=800000  # each iteration of training, see this many [input]
                         # frames per job.  This option is passed to get_egs.sh.
                         # Aim for about a minute of training time
 right_tolerance=5  # tolerance at the same frame-rate as the alignment directory.
 left_tolerance=5    # tolerance at the same frame-rate as the alignment directory.
-num_jobs_initial=1  # Number of neural net jobs to run in parallel at the start of training
-num_jobs_final=8   # Number of neural net jobs to run in parallel at the end of training
+num_jobs_initial=3  # Number of neural net jobs to run in parallel at the start of training
+num_jobs_final=16   # Number of neural net jobs to run in parallel at the end of training
 frame_subsampling_factor=3  # ratio of frames-per-second of features we train
                             # on, to chain model's output
 alignment_subsampling_factor=3  # ratio of frames-per-second of input alignments
                                 # to chain model's output
 get_egs_stage=0    # can be used for rerunning after partial
 online_ivector_dir=
-max_param_change=2.0
+max_param_change=1.0
 remove_egs=true  # set to false to disable removing egs after training is done.
 
 max_models_combine=20 # The "max_models_combine" is the maximum number of models we give

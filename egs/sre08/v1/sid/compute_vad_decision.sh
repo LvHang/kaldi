@@ -41,12 +41,15 @@ name=`basename $data`
 mkdir -p $vaddir || exit 1;
 mkdir -p $logdir || exit 1;
 
-
 for f in $data/feats.scp "$vad_config"; do
   if [ ! -f $f ]; then
     echo "compute_vad_decision.sh: no such file $f"
     exit 1;
   fi
+done
+
+for n in $(seq $nj);do
+  utils/create_data_link.pl $vaddir/vad_${name}.${nj}.ark
 done
 
 utils/split_data.sh $data $nj || exit 1;

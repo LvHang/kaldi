@@ -156,8 +156,8 @@ def train_new_models(dir, iter, srand, num_jobs,
     # iteration.  Don't do it on iteration 0 either, because we use a smaller
     # than normal minibatch size, and people may get confused thinking it's
     # slower for iteration 0 because of the verbose option.
-    verbose_opt = ("--verbose=1" if iter % 20 == 0 and iter > 0 else "")
-
+    #verbose_opt = ("--verbose=1" if iter % 20 == 0 and iter > 0 else "")
+    verbose_opt = ("--verbose=2" if iter % 20 == 0 and iter > 0 else "")
     for job in range(1, num_jobs+1):
         # k is a zero-based index that we will derive the other indexes from.
         k = num_archives_processed + job - 1
@@ -166,10 +166,9 @@ def train_new_models(dir, iter, srand, num_jobs,
         # previous : frame_shift = (k/num_archives) % frame_subsampling_factor
         frame_shift = ((archive_index + k/num_archives)
                        % frame_subsampling_factor)
-
         cache_io_opts = (("--read-cache={dir}/cache.{iter}".format(dir=dir,
                                                                   iter=iter)
-                          if iter > 0 else "") +
+                          if (iter > 0 and os.path.exists("{dir}/cache.{iter}".format(dir=dir, iter=iter))) else "") +
                          (" --write-cache={0}/cache.{1}".format(dir, iter + 1)
                           if job == 1 else ""))
 
@@ -233,7 +232,7 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                         leaky_hmm_coefficient,
                         momentum, max_param_change, shuffle_buffer_size,
                         frame_subsampling_factor,
-                        run_opts, dropout_edit_string="",
+                        run_opts, dropout_edit_string="", do_average=None,
                         backstitch_training_scale=0.0, backstitch_training_interval=1):
     """ Called from steps/nnet3/chain/train.py for one iteration for
     neural network training with LF-MMI objective
@@ -269,13 +268,25 @@ def train_one_iteration(dir, iter, srand, egs_dir,
     if iter > 0:
         # Runs in the background
         compute_progress(dir, iter, run_opts)
-
-    do_average = (iter > 0)
+    if do_average is None:
+        do_average = (iter > 0)
+    # If do_average is none, averaging is not done in:
+    # 1) The 1st iteration
+    # 2) If max objective in all jobs are less than threshold
+    #if do_average is None:
+    #    do_average = True
+    #    num_jobs_prev = num_jobs
+    #    if iter > 0:
+    #        # check best 'overall average objective' and return do_averag=False
+    #        # if it is smaller than some threshold.
+    #        if not os.path.exists('{0}/log/train.{1}.{2}.log'.format(dir, iter, num_jobs)):
+    #            num_jobs_prev = num_jobs -1
+    #        do_average = common_train_lib.get_successful_models(
+    #             num_jobs_prev, '{0}/log/train.{1}.%.log'.format(dir, iter-1))[2]
 
     raw_model_string = ("nnet3-am-copy --raw=true --learning-rate={0} "
                         "--scale={1} {2}/{3}.mdl - |".format(
                             learning_rate, shrinkage_value, dir, iter))
-
     if do_average:
         cur_num_chunk_per_minibatch_str = num_chunk_per_minibatch_str
         cur_max_param_change = max_param_change
@@ -313,7 +324,7 @@ def train_one_iteration(dir, iter, srand, egs_dir,
                          iter / 15 if iter < 15 else backstitch_training_scale),
                      backstitch_training_interval=backstitch_training_interval)
 
-    [models_to_average, best_model] = common_train_lib.get_successful_models(
+    [models_to_average, best_model, do_average_bkup] = common_train_lib.get_successful_models(
          num_jobs, '{0}/log/train.{1}.%.log'.format(dir, iter))
     nnets_list = []
     for n in models_to_average:

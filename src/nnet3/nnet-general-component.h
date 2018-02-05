@@ -65,7 +65,7 @@ class DistributeComponent: public Component {
   // use the default Info() function.
   virtual void InitFromConfig(ConfigLine *cfl);
   virtual std::string Type() const { return "DistributeComponent"; }
-  virtual int32 Properties() const { return kLinearInInput; }
+  virtual int32 Properties() const { return 0; }
   virtual void* Propagate(const ComponentPrecomputedIndexes *indexes,
                          const CuMatrixBase<BaseFloat> &in,
                          CuMatrixBase<BaseFloat> *out) const;
@@ -475,7 +475,7 @@ class BackpropTruncationComponent: public Component {
   virtual std::string Type() const { return "BackpropTruncationComponent"; }
 
   virtual int32 Properties() const {
-    return kLinearInInput|kPropagateInPlace|kBackpropInPlace;
+    return kPropagateInPlace|kBackpropInPlace;
   }
 
   virtual void ZeroStats();
@@ -502,6 +502,7 @@ class BackpropTruncationComponent: public Component {
 
   virtual void Scale(BaseFloat scale);
   virtual void Add(BaseFloat alpha, const Component &other);
+  virtual void ApplyMinMaxToWeights() {}
   virtual void Read(std::istream &is, bool binary); // This Read function
   // requires that the Component has the correct type.
   /// Write component to stream
@@ -615,7 +616,7 @@ class ConstantComponent: public UpdatableComponent {
   virtual std::string Type() const { return "ConstantComponent"; }
   virtual int32 Properties() const {
     return
-        (is_updatable_ ? kUpdatableComponent|kLinearInParameters : 0);
+        (is_updatable_ ? kUpdatableComponent : 0);
   }
   virtual void* Propagate(const ComponentPrecomputedIndexes *indexes,
                          const CuMatrixBase<BaseFloat> &in,
@@ -656,6 +657,7 @@ class ConstantComponent: public UpdatableComponent {
   virtual void Scale(BaseFloat scale);
   virtual void Add(BaseFloat alpha, const Component &other);
   virtual void PerturbParams(BaseFloat stddev);
+  virtual void ApplyMinMaxToWeights() {}
   virtual BaseFloat DotProduct(const UpdatableComponent &other) const;
   virtual int32 NumParameters() const;
   virtual void Vectorize(VectorBase<BaseFloat> *params) const;

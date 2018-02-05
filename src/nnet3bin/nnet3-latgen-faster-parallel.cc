@@ -102,6 +102,7 @@ int main(int argc, char *argv[]) {
       am_nnet.Read(ki.Stream(), binary);
       SetBatchnormTestMode(true, &(am_nnet.GetNnet()));
       SetDropoutTestMode(true, &(am_nnet.GetNnet()));
+      SetShiftInputTestMode(true, &(am_nnet.GetNnet()));
       CollapseModel(CollapseModelConfig(), &(am_nnet.GetNnet()));
     }
 
@@ -139,8 +140,6 @@ int main(int argc, char *argv[]) {
       timer.Reset();
 
       {
-        LatticeFasterDecoder decoder(*decode_fst, config);
-
         for (; !feature_reader.Done(); feature_reader.Next()) {
           std::string utt = feature_reader.Key();
           const Matrix<BaseFloat> &features (feature_reader.Value());

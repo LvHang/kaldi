@@ -18,3 +18,5 @@
  full-covariance GMM-UBM, iVectors, and a PLDA backend.  The example 
  in v2 demonstrates DNN speaker embeddings with a PLDA backend.
 
+
+

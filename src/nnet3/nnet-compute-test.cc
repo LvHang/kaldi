@@ -86,6 +86,7 @@ void TestNnetDecodable(Nnet *nnet) {
 
   SetBatchnormTestMode(true, nnet);
   SetDropoutTestMode(true, nnet);
+  SetShiftInputTestMode(true, nnet);
 
   input.SetRandn();
   Vector<BaseFloat> ivector(ivector_dim);
@@ -170,6 +171,7 @@ void UnitTestNnetCompute() {
       // and dropout components.
       SetBatchnormTestMode(true, &nnet);
       SetDropoutTestMode(true, &nnet);
+      SetShiftInputTestMode(true, &nnet);
     }
 
     NnetComputation computation;
@@ -284,7 +286,7 @@ int main() {
   using namespace kaldi::nnet3;
   // uncommenting the following activates extra checks during optimization, that
   // can help narrow down the source of problems.
-  // SetVerboseLevel(4);
+  SetVerboseLevel(4);
 
 
   for (kaldi::int32 loop = 0; loop < 2; loop++) {

@@ -42,7 +42,8 @@ int main(int argc, char *argv[]) {
 
     bool binary_write = true;
     bool batchnorm_test_mode = false,
-        dropout_test_mode = true;
+        dropout_test_mode = true,
+        shift_input_test_mode = true;
     std::string use_gpu = "yes";
     NnetCombineConfig combine_config;
     chain::ChainTrainingOptions chain_config;
@@ -56,6 +57,8 @@ int main(int argc, char *argv[]) {
     po.Register("dropout-test-mode", &dropout_test_mode,
                 "If true, set test-mode to true on any DropoutComponents and "
                 "DropoutMaskComponents.");
+    po.Register("shift-input-test-mode", &shift_input_test_mode,
+                "If true, set test-mode to true on any ShiftInputComponent.");
 
     combine_config.Register(&po);
     chain_config.Register(&po);
@@ -88,6 +91,8 @@ int main(int argc, char *argv[]) {
       SetBatchnormTestMode(true, &nnet);
     if (dropout_test_mode)
       SetDropoutTestMode(true, &nnet);
+    if (shift_input_test_mode)
+      SetShiftInputTestMode(true, &nnet);
 
     std::vector<NnetChainExample> egs;
     egs.reserve(10000);  // reserve a lot of space to minimize the chance of

@@ -113,7 +113,7 @@ namespace time_height_convolution {
    start from zero, they can be less than zero, just like the offsets in TDNNs
    which are often lists like (-3,0,3).  Don't be surprised to see things like:
 
-   offsets={ (-3,-1),(-3,0),(-3,1), (0,-1),(0,0),(0,2), (3,-1),(3,0),(3,1) }
+   offsets={ (-3,-1),(-3,0),(-3,1), (0,-1),(0,0),(0,1), (3,-1),(3,0),(3,1) }
 
    If there are negative offsets in the height dimension (as above) it means
    that there is zero-padding in the height dimension (because the first
@@ -440,9 +440,15 @@ void CheckModelAndIo(const ConvolutionModel &model,
                       each Index (n,t,x) in 'output_indexes', the Index
                       (n,t+time_offset,x) must be present in 'input_indexes'
                       for each time_offset in model.required_time_offsets.
+   @param [in] opts  Options class (currently has just the memory limit).
    @param [out] computation  If non-NULL, the compiled computation will be
                       written to this location.
-
+   @param [out] input_indexes_modified.  This is like 'input_indexes', but
+                      it will be sorted in the way we require and it may be
+                      padded as needed with Indexes of the form (n, kNoTime, x).
+   @param [out] output_indexes_modified.  This is like 'output_indexes', but
+                      it will be sorted in the way we require and it may be
+                      padded as needed with Indexes of the form (n, kNoTime, x).
  */
 void CompileConvolutionComputation(
     const ConvolutionModel &model,
@@ -452,6 +458,7 @@ void CompileConvolutionComputation(
     ConvolutionComputation *computation,
     std::vector<Index> *input_indexes_modified,
     std::vector<Index> *output_indexes_modified);
+
 
 
 /**
@@ -585,6 +592,18 @@ void GetIndexesForComputation(
  */
 void PadComputationInputTime(const ConvolutionModel &model,
                              ConvolutionComputationIo *io);
+
+
+/*
+  This function pads the 'io' object; it's a special case that is used in
+  TimeConvolutionComponent.  It makes sure that the t_step_in and t_step_out are
+  both one, and then it ensures that for each output frame, a left and right
+  context given by 'frames_left_context' and 'frames_right_context' are present.
+ */
+void PadComputationIoSpecial(int32 frames_left_context,
+                             int32 frames_right_context,
+                             ConvolutionComputationIo *io);
+
 
 
 /**

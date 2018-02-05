@@ -61,18 +61,20 @@ struct NnetComputeProbOptions {
   // constructor of NnetComputeProb that takes a pointer to the nnet, and the
   // stats will be stored there.
   bool store_component_stats;
-  
+
   bool compute_per_dim_accuracy;
 
   NnetOptimizeOptions optimize_config;
   NnetComputeOptions compute_config;
   CachingOptimizingCompilerOptions compiler_config;
+  std::string regularize_factors;
   NnetComputeProbOptions():
       debug_computation(false),
       compute_deriv(false),
       compute_accuracy(true),
       store_component_stats(false),
-      compute_per_dim_accuracy(false) { }
+      compute_per_dim_accuracy(false),
+      regularize_factors("output:1.0") { }
   void Register(OptionsItf *opts) {
     // compute_deriv is not included in the command line options
     // because it's not relevant for nnet3-compute-prob.
@@ -84,7 +86,12 @@ struct NnetComputeProbOptions {
                    "accuracy values as well as objective functions");
     opts->Register("compute-per-dim-accuracy", &compute_per_dim_accuracy,
                    "If true, compute accuracy values per-dim");
-
+    opts->Register("regularize-factors", &regularize_factors,
+                   "Comma-separated pairs of output-name and its regulazitation factor ."
+                   "as output-name:regularization-factor. "
+                   "e.g. output:1.0,output-regression:0.2 means "
+                   "reugularization factor 1.0 and 0.2 for classification and "
+                   "regression objective functions.");
     // register the optimization options with the prefix "optimization".
     ParseOptions optimization_opts("optimization", opts);
     optimize_config.Register(&optimization_opts);

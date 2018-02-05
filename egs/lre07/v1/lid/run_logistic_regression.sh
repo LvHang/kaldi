@@ -4,7 +4,7 @@
 #
 # This script trains a logistic regression model on top of
 # i-Vectors, and evaluates it on the NIST LRE07 closed-set
-# evaluation.  
+# evaluation.
 
 . ./cmd.sh
 . ./path.sh

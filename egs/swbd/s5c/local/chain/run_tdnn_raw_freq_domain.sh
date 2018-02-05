@@ -143,7 +143,7 @@ if [ $stage -le 13 ]; then
   # please note that it is important to have input layer with the name=input
   # as the layer immediately preceding the fixed-affine-layer to enable
   # the use of short notation for the descriptor
-  preprocess-fft-abs2-lognorm-affine-log-layer name=raw0 input=Append(-1,0,1) cos-transform-file=$dir/configs/cos_transform.mat sin-transform-file=$dir/configs/sin_transform.mat num-filters=$num_filters dim=80 half-fft-range=true
+  preprocess-fft-abs-lognorm-affine-log-layer name=raw0 input=Append(-1,0,1) cos-transform-file=$dir/configs/cos_transform.mat sin-transform-file=$dir/configs/sin_transform.mat num-filters=$num_filters dim=80 half-fft-range=true
   relu-batchnorm-layer name=tdnn1 input=Append(-1,0,1,ReplaceIndex(ivector, t, 0)) dim=625
   relu-batchnorm-layer name=tdnn2 input=Append(-1,0,1) dim=625
   relu-batchnorm-layer name=tdnn3 input=Append(-1,0,1) dim=625
