@@ -155,6 +155,8 @@ Component* Component::NewComponentOfType(const std::string &component_type) {
     ans = new ConstantFunctionComponent();
   } else if (component_type == "ConstantComponent") {
     ans = new ConstantComponent();
+  } else if (component_type == "XvectorComponent") {
+    ans = new XvectorComponent();
   } else if (component_type == "DropoutComponent") {
     ans = new DropoutComponent();
   } else if (component_type == "DropoutMaskComponent") {

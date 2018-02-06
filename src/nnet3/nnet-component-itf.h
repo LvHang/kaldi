@@ -83,6 +83,8 @@ enum ComponentProperties {
   kRandomComponent = 0x2000   // true if the component has some kind of
                               // randomness, like DropoutComponent (these should
                               // inherit from class RandomComponent.
+  kInputPositive = 0x4000 // true if the component requires that the input is
+                          // positive.
 };
 
 

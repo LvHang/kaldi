@@ -689,7 +689,7 @@ int main() {
 #else
     kaldi::CudaMathUnitTest<float>();
 #endif
-
+    UnitTestComputeXvectorObjfFromScores();
     if (loop == 0)
       KALDI_LOG << "Tests without GPU use succeeded.";
     else

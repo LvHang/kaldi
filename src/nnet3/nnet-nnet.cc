@@ -364,6 +364,17 @@ void Nnet::ProcessInputNodeConfigLine(
   node_names_.push_back(name);
 }
 
+void Nnet::RenameOutputNode(const std::string &old_name,
+    const std::string &new_name) {
+  int32 old_n = GetNodeIndex(old_name),
+        new_n = GetNodeIndex(new_name);
+  if (old_n == -1 || !IsOutputNode(old_n))
+    KALDI_ERR << "Node " << old_name << " is not an output node.";
+  if (new_n != -1)
+    KALDI_ERR << "Node named " << new_name << " already exists.";
+  node_names_[old_n] = new_name;
+}
+
 
 void Nnet::ProcessOutputNodeConfigLine(
     int32 pass,

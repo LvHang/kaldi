@@ -25,6 +25,20 @@
 #include "nnet3/am-nnet-simple.h"
 #include "nnet3/nnet-utils.h"
 
+namespace kaldi {
+void RenameNodes(const std::string nodes_to_rename, nnet3::Nnet *nnet) {
+  std::vector<std::string> name_pairs;
+  SplitStringToVector(nodes_to_rename, ",", false, &name_pairs);
+  for (int32 i = 0; i < name_pairs.size(); i++) {
+    std::vector<std::string> name_pair;
+    SplitStringToVector(name_pairs[i], ":", false, &name_pair);
+    if (name_pair.size() != 2)
+      KALDI_ERR << "Malformed argument to option --rename-output-nodes";
+    nnet->RenameOutputNode(name_pair[0], name_pair[1]);
+  }
+}
+}
+
 int main(int argc, char *argv[]) {
   try {
     using namespace kaldi;
@@ -51,6 +65,9 @@ int main(int argc, char *argv[]) {
     po.Register("learning-rate", &learning_rate,
                 "If supplied, all the learning rates of updatable components"
                 "are set to this value.");
+    po.Register("rename-output-nodes", &rename_output_nodes, "Rename one or"
+                " more output nodes. For example, TODO");
+    po.Register("scale-learning-rates", &learning_rates_str, "TODO");
     po.Register("nnet-config", &nnet_config,
                 "Name of nnet3 config file that can be used to add or replace "
                 "components or nodes of the neural network (the same as you "
@@ -82,6 +99,8 @@ int main(int argc, char *argv[]) {
 
     Nnet nnet;
     ReadKaldiObject(raw_nnet_rxfilename, &nnet);
+    if (rename_output_nodes != "")
+      RenameNodes(rename_output_nodes, &nnet);
 
     if (!nnet_config.empty()) {
       Input ki(nnet_config);
@@ -93,7 +112,6 @@ int main(int argc, char *argv[]) {
 
     if (scale != 1.0)
       ScaleNnet(scale, &nnet);
-
     if (!edits_config.empty()) {
       Input ki(edits_config);
       ReadEditConfig(ki.Stream(), &nnet);

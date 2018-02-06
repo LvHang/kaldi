@@ -2,6 +2,7 @@
 
 // Copyright 2009-2012  Karel Vesely
 //                      Johns Hopkins University (author: Daniel Povey)
+//           2016       David Snyder
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -87,122 +88,122 @@ void Randomize(const CuMatrixBase<Real> &src,
 
   #if HAVE_CUDA == 1
   if (CuDevice::Instantiate().Enabled()) {
-    CuTimer tim;
+  CuTimer tim;
 
-    /*
-    Note: default 16x16 block-size limits the --cachesize to matrix size 16*65535 x 16*65535
-    dim3 dimBlock(CU2DBLOCK, CU2DBLOCK);
-    dim3 dimGrid(n_blocks(tgt->NumCols(), CU2DBLOCK), n_blocks(copy_from_idx.Dim(), CU2DBLOCK));
-    */
+  /*
+  Note: default 16x16 block-size limits the --cachesize to matrix size 16*65535 x 16*65535
+  dim3 dimBlock(CU2DBLOCK, CU2DBLOCK);
+  dim3 dimGrid(n_blocks(tgt->NumCols(), CU2DBLOCK), n_blocks(copy_from_idx.Dim(), CU2DBLOCK));
+  */
 
-    /*
-     * Let's use blocksize 4 x 128 (512 threads/block)
-     * and extend the randomizable matrices to: col 4*65535, row 128*65535
-     * (ie. max-cols:262140 (dim), max-rows:8388480 (datapoints))
-     */
-    dim3 dimBlock(4, 128);
-    dim3 dimGrid(n_blocks(tgt->NumCols(), 4), n_blocks(copy_from_idx.Dim(), 128));
-    /*
-     */
+  /*
+   * Let's use blocksize 4 x 128 (512 threads/block)
+   * and extend the randomizable matrices to: col 4*65535, row 128*65535
+   * (ie. max-cols:262140 (dim), max-rows:8388480 (datapoints))
+   */
+  dim3 dimBlock(4, 128);
+  dim3 dimGrid(n_blocks(tgt->NumCols(), 4), n_blocks(copy_from_idx.Dim(), 128));
+  /*
+   */
 
-    MatrixDim dimsrc = src.Dim(); dimsrc.rows=copy_from_idx.Dim();
-    MatrixDim dimtgt = tgt->Dim(); dimtgt.rows=copy_from_idx.Dim();
+  MatrixDim dimsrc = src.Dim(); dimsrc.rows=copy_from_idx.Dim();
+  MatrixDim dimtgt = tgt->Dim(); dimtgt.rows=copy_from_idx.Dim();
 
-    cuda_randomize(dimGrid, dimBlock, tgt->Data(), src.Data(),
-                   copy_from_idx.Data(), dimtgt, dimsrc);
-    CU_SAFE_CALL(cudaGetLastError());
+  cuda_randomize(dimGrid, dimBlock, tgt->Data(), src.Data(),
+                 copy_from_idx.Data(), dimtgt, dimsrc);
+  CU_SAFE_CALL(cudaGetLastError());
 
-    CuDevice::Instantiate().AccuProfile(__func__, tim);
-  } else
-  #endif
-  {
-    // randomize in CPU
-    const MatrixBase<Real> &srcmat = src.Mat();
-    const int32 *copy_from_idxvec = copy_from_idx.Data();
-    MatrixBase<Real> &tgtmat = tgt->Mat();
-    for(int32 i=0; i<copy_from_idx.Dim(); i++) {
-      tgtmat.Row(i).CopyFromVec(srcmat.Row(copy_from_idxvec[i]));
-    }
+  CuDevice::Instantiate().AccuProfile(__func__, tim);
+} else
+#endif
+{
+  // randomize in CPU
+  const MatrixBase<Real> &srcmat = src.Mat();
+  const int32 *copy_from_idxvec = copy_from_idx.Data();
+  MatrixBase<Real> &tgtmat = tgt->Mat();
+  for(int32 i=0; i<copy_from_idx.Dim(); i++) {
+    tgtmat.Row(i).CopyFromVec(srcmat.Row(copy_from_idxvec[i]));
   }
+}
 }
 
 
 
 template<typename Real>
 void Splice(const CuMatrixBase<Real> &src, const CuArray<int32> &frame_offsets,
-            CuMatrixBase<Real> *tgt) {
+          CuMatrixBase<Real> *tgt) {
 
-  KALDI_ASSERT(src.NumCols()*frame_offsets.Dim() == tgt->NumCols());
-  KALDI_ASSERT(src.NumRows() == tgt->NumRows());
+KALDI_ASSERT(src.NumCols()*frame_offsets.Dim() == tgt->NumCols());
+KALDI_ASSERT(src.NumRows() == tgt->NumRows());
 
-  #if HAVE_CUDA == 1
-  if (CuDevice::Instantiate().Enabled()) {
-    CuTimer tim;
+#if HAVE_CUDA == 1
+if (CuDevice::Instantiate().Enabled()) {
+  CuTimer tim;
 
-    dim3 dimBlock(CU2DBLOCK, CU2DBLOCK);
-    dim3 dimGrid(n_blocks(tgt->NumCols(), CU2DBLOCK), n_blocks(tgt->NumRows(), CU2DBLOCK));
+  dim3 dimBlock(CU2DBLOCK, CU2DBLOCK);
+  dim3 dimGrid(n_blocks(tgt->NumCols(), CU2DBLOCK), n_blocks(tgt->NumRows(), CU2DBLOCK));
 
-    cuda_splice(dimGrid, dimBlock, tgt->Data(), src.Data(),
-                frame_offsets.Data(), tgt->Dim(), src.Dim());
-    CU_SAFE_CALL(cudaGetLastError());
+  cuda_splice(dimGrid, dimBlock, tgt->Data(), src.Data(),
+              frame_offsets.Data(), tgt->Dim(), src.Dim());
+  CU_SAFE_CALL(cudaGetLastError());
 
-    CuDevice::Instantiate().AccuProfile(__func__, tim);
-  } else
-  #endif
-  {
-    // expand in CPU
-    const MatrixBase<Real> &srcmat = src.Mat();
-    const int32 *frame_offsetvec = frame_offsets.Data();
-    int32 dim = frame_offsets.Dim();
-    MatrixBase<Real> &tgtmat = tgt->Mat();
-    //
-    for(int32 r=0; r < tgtmat.NumRows(); r++) {
-      for(int32 off=0; off < dim; off++) {
-        int32 r_off = r + frame_offsetvec[off];
-        if(r_off < 0) r_off = 0;
-        if(r_off >= srcmat.NumRows()) r_off = srcmat.NumRows()-1;
-        memcpy(tgtmat.RowData(r)+off*srcmat.NumCols(),srcmat.RowData(r_off),sizeof(Real)*srcmat.NumCols());
-      }
+  CuDevice::Instantiate().AccuProfile(__func__, tim);
+} else
+#endif
+{
+  // expand in CPU
+  const MatrixBase<Real> &srcmat = src.Mat();
+  const int32 *frame_offsetvec = frame_offsets.Data();
+  int32 dim = frame_offsets.Dim();
+  MatrixBase<Real> &tgtmat = tgt->Mat();
+  //
+  for(int32 r=0; r < tgtmat.NumRows(); r++) {
+    for(int32 off=0; off < dim; off++) {
+      int32 r_off = r + frame_offsetvec[off];
+      if(r_off < 0) r_off = 0;
+      if(r_off >= srcmat.NumRows()) r_off = srcmat.NumRows()-1;
+      memcpy(tgtmat.RowData(r)+off*srcmat.NumCols(),srcmat.RowData(r_off),sizeof(Real)*srcmat.NumCols());
     }
   }
+}
 }
 
 
 
 template<typename Real>
 void Copy(const CuMatrixBase<Real> &src, const CuArray<int32> &copy_from_indices,
-          CuMatrixBase<Real> *tgt) {
+        CuMatrixBase<Real> *tgt) {
 
-  KALDI_ASSERT(copy_from_indices.Dim() == tgt->NumCols());
-  KALDI_ASSERT(src.NumRows() == tgt->NumRows());
+KALDI_ASSERT(copy_from_indices.Dim() == tgt->NumCols());
+KALDI_ASSERT(src.NumRows() == tgt->NumRows());
 
-  #if HAVE_CUDA == 1
-  if (CuDevice::Instantiate().Enabled()) {
-    CuTimer tim;
+#if HAVE_CUDA == 1
+if (CuDevice::Instantiate().Enabled()) {
+  CuTimer tim;
 
-    dim3 dimBlock(CU2DBLOCK, CU2DBLOCK);
-    dim3 dimGrid(n_blocks(tgt->NumCols(), CU2DBLOCK), n_blocks(tgt->NumRows(), CU2DBLOCK));
+  dim3 dimBlock(CU2DBLOCK, CU2DBLOCK);
+  dim3 dimGrid(n_blocks(tgt->NumCols(), CU2DBLOCK), n_blocks(tgt->NumRows(), CU2DBLOCK));
 
-    cuda_copy(dimGrid, dimBlock, tgt->Data(), src.Data(),
-              copy_from_indices.Data(), tgt->Dim(), src.Dim());
-    CU_SAFE_CALL(cudaGetLastError());
+  cuda_copy(dimGrid, dimBlock, tgt->Data(), src.Data(),
+            copy_from_indices.Data(), tgt->Dim(), src.Dim());
+  CU_SAFE_CALL(cudaGetLastError());
 
-    CuDevice::Instantiate().AccuProfile(__func__, tim);
-  } else
-  #endif
-  {
-    // expand in CPU
-    const MatrixBase<Real> &srcmat = src.Mat();
-    const int32 *copy_from_indicesvec = copy_from_indices.Data();
-    int32 dim = copy_from_indices.Dim();
-    MatrixBase<Real> &tgtmat = tgt->Mat();
-    //
-    for(int32 r = 0; r < tgtmat.NumRows(); r++) {
-      for(int32 c = 0; c < dim; c++) {
-        tgtmat(r,c) = srcmat(r,copy_from_indicesvec[c]);
-      }
+  CuDevice::Instantiate().AccuProfile(__func__, tim);
+} else
+#endif
+{
+  // expand in CPU
+  const MatrixBase<Real> &srcmat = src.Mat();
+  const int32 *copy_from_indicesvec = copy_from_indices.Data();
+  int32 dim = copy_from_indices.Dim();
+  MatrixBase<Real> &tgtmat = tgt->Mat();
+  //
+  for(int32 r = 0; r < tgtmat.NumRows(); r++) {
+    for(int32 c = 0; c < dim; c++) {
+      tgtmat(r,c) = srcmat(r,copy_from_indicesvec[c]);
     }
   }
+}
 }
 
 template <typename Real>
@@ -238,6 +239,48 @@ void EnsureNonzero(const CuMatrixBase<Real> &src,
   }
 }
 
+void ComputeXvectorObjfFromScores(const CuMatrixBase<BaseFloat> &scores,
+                                  CuMatrixBase<BaseFloat> *objf_terms,
+                                  CuMatrixBase<BaseFloat> *objf_derivs) {
+  KALDI_ASSERT(SameDim(*objf_terms, *objf_derivs)
+               && SameDim(*objf_terms, scores) &&
+               scores.NumRows() == scores.NumCols());
+  #if HAVE_CUDA == 1
+  if (CuDevice::Instantiate().Enabled()) {
+    Timer tim;
+    dim3 dimBlock(CU2DBLOCK, CU2DBLOCK);
+    dim3 dimGrid(n_blocks(scores.NumCols(), CU2DBLOCK),
+                 n_blocks(scores.NumRows(), CU2DBLOCK));
+
+    cuda_compute_xvector_objf(dimGrid, dimBlock, scores.Data(), scores.Dim(),
+      objf_terms->Data(), objf_terms->Dim(), objf_derivs->Data(),
+      objf_derivs->Dim());
+    CU_SAFE_CALL(cudaGetLastError());
+
+    CuDevice::Instantiate().AccuProfile(__func__, tim.Elapsed());
+  } else
+  #endif
+  {
+    // Compute the xvector objective function and its derivatives in the CPU.
+    int32 num_rows = scores.NumRows();
+    BaseFloat K = 1.0 / (num_rows - 2.0);
+    for (int32 i = 0; i < num_rows; i++) {
+      for (int32 j = 0; j < num_rows; j++) {
+        BaseFloat L = scores(i, j);
+        if (i + 1 == j && i % 2 == 0) {
+          (*objf_terms)(i, j) = L < -15 ? L : -log(1.0 + exp(-L));
+          (*objf_derivs)(i, j) = L > 15 ? 0.0 : 1.0 / (1.0 + exp(L));
+        } else if (i < j) {
+          (*objf_terms)(i, j) = K * (L > 15 ? -L : -log(1.0 + exp(L)));
+          (*objf_derivs)(i, j) = L < -15 ? 0 : -K / (1.0 + exp(-L));
+        } else {
+          (*objf_terms)(i, j) = 0;
+          (*objf_derivs)(i, j) = 0;
+        }
+      }
+    }
+  }
+}
 
 // instantiate the templates.
 template
@@ -992,7 +1035,6 @@ void BackpropLstmNonlinearity(const CuMatrixBase<double> &input,
                               CuMatrixBase<double> *value_sum_out,
                               CuMatrixBase<double> *deriv_sum_out,
                               CuMatrixBase<double> *self_repair_sum_out);
-
 
 
 } //namespace cu

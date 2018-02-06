@@ -557,6 +557,7 @@ void StatisticsPoolingComponent::InitFromConfig(ConfigLine *cfl) {
   cfl->GetValue("right-context", &right_context_);
   cfl->GetValue("num-log-count-features", &num_log_count_features_);
   cfl->GetValue("output-stddevs", &output_stddevs_);
+  cfl->GetValue("output-sum", &output_sum_);
   cfl->GetValue("variance-floor", &variance_floor_);
 
   if (cfl->HasUnusedValues())
@@ -572,7 +573,7 @@ void StatisticsPoolingComponent::InitFromConfig(ConfigLine *cfl) {
 
 StatisticsPoolingComponent::StatisticsPoolingComponent():
     input_dim_(-1), input_period_(1), left_context_(-1), right_context_(-1),
-    num_log_count_features_(0), output_stddevs_(false),
+    num_log_count_features_(0), output_stddevs_(false), output_sum_(false),
     variance_floor_(1.0e-10) { }
 
 
@@ -582,6 +583,7 @@ StatisticsPoolingComponent::StatisticsPoolingComponent(
     left_context_(other.left_context_), right_context_(other.right_context_),
     num_log_count_features_(other.num_log_count_features_),
     output_stddevs_(other.output_stddevs_),
+    output_sum_(other.output_sum_),
     variance_floor_(1.0e-10) {
   Check();
 }
@@ -595,6 +597,7 @@ void StatisticsPoolingComponent::Check() const {
                right_context_ % input_period_ == 0);
   KALDI_ASSERT(variance_floor_ > 0.0 && variance_floor_ < 1.0);
   KALDI_ASSERT(!output_stddevs_ || (input_dim_ - 1) % 2 == 0);
+  KALDI_ASSERT((!output_stddevs_ || !output_sum_));
 }
 
 void StatisticsPoolingComponent::Read(std::istream &is, bool binary) {
@@ -611,6 +614,8 @@ void StatisticsPoolingComponent::Read(std::istream &is, bool binary) {
   ReadBasicType(is, binary, &num_log_count_features_);
   ExpectToken(is, binary, "<OutputStddevs>");
   ReadBasicType(is, binary, &output_stddevs_);
+  ExpectToken(is, binary, "<OutputSum>");
+  ReadBasicType(is, binary, &output_sum_);
   ExpectToken(is, binary, "<VarianceFloor>");
   ReadBasicType(is, binary, &variance_floor_);
   ExpectToken(is, binary, "</StatisticsPoolingComponent>");
@@ -631,6 +636,8 @@ void StatisticsPoolingComponent::Write(std::ostream &os, bool binary) const {
   WriteBasicType(os, binary, num_log_count_features_);
   WriteToken(os, binary, "<OutputStddevs>");
   WriteBasicType(os, binary, output_stddevs_);
+  WriteToken(os, binary, "<OutputSum>");
+  WriteBasicType(os, binary, output_sum_);
   WriteToken(os, binary, "<VarianceFloor>");
   WriteBasicType(os, binary, variance_floor_);
   WriteToken(os, binary, "</StatisticsPoolingComponent>");
@@ -775,7 +782,8 @@ void* StatisticsPoolingComponent::Propagate(
   out->SetZero();
   KALDI_ASSERT(indexes_in != NULL);
   const StatisticsPoolingComponentPrecomputedIndexes *indexes =
-      dynamic_cast<const StatisticsPoolingComponentPrecomputedIndexes*>(indexes_in);
+      dynamic_cast<const StatisticsPoolingComponentPrecomputedIndexes*>(
+      indexes_in);
   int32 num_rows_out = out->NumRows();
   KALDI_ASSERT(indexes != NULL &&
                indexes->forward_indexes.Dim() == num_rows_out &&
@@ -787,10 +795,14 @@ void* StatisticsPoolingComponent::Propagate(
   counts_mat.AddRowRanges(in.ColRange(0, 1), indexes->forward_indexes);
 
   CuSubMatrix<BaseFloat> out_non_count(*out, 0, num_rows_out,
-                                       num_log_count_features_, input_dim_ - 1);
+                                       num_log_count_features_,
+                                       input_dim_ - 1);
   out_non_count.AddRowRanges(in.ColRange(1, input_dim_ - 1),
                              indexes->forward_indexes);
-  out_non_count.DivRowsVec(counts);
+
+  if (!output_sum_)
+    // If output_sum_ == true, this is a sum instead of a mean.
+    out_non_count.DivRowsVec(counts);
 
   if (num_log_count_features_ > 0) {
     counts.ApplyLog();
@@ -854,31 +866,34 @@ void StatisticsPoolingComponent::Backprop(
     variance_deriv.Scale(0.5);
 
     // the deriv w.r.t. the uncentered variance is the same as w.r.t.  the
-    // uncentered variance (since they difer by a constant term of -(mean *
+    // uncentered variance (since they differ by a constant term of -(mean *
     // mean), but we need to add to dF/dmean, the value -2.0 * mean *
     // dF/dvariance.
     mean_deriv.AddMatMatElements(-2.0, mean_value, variance_deriv, 1.0);
   }
-  // now we have to account for the effect of division by the count, on
-  // the derivative.
-  CuVector<BaseFloat> counts(num_rows_out, kUndefined);
-  if (num_log_count_features_ > 0) {
-    counts.CopyColFromMat(out_value, 0);
-    counts.ApplyExp();
-  } else {
-    counts.SetZero();
-    // we need to recompute the counts from the input since they are not in the
-    // output.  The submatrix initializer below takes num-rows, num-cols,
-    // stride;  num-cols and stride are 1.
-    CuSubMatrix<BaseFloat> counts_mat(counts.Data(), num_rows_out, 1, 1);
-    counts_mat.AddRowRanges(in_value.ColRange(0, 1), indexes->forward_indexes);
+  // We have to account for the effect
+  // of division by the count, on the derivative.
+  if (!output_sum_) {
+    CuVector<BaseFloat> counts(num_rows_out, kUndefined);
+    if (num_log_count_features_ > 0) {
+      counts.CopyColFromMat(out_value, 0);
+      counts.ApplyExp();
+    } else {
+      counts.SetZero();
+      // we need to recompute the counts from the input since they are not in
+      // the output.  The submatrix initializer below takes num-rows,
+      // num-cols, stride;  num-cols and stride are 1.
+      CuSubMatrix<BaseFloat> counts_mat(counts.Data(), num_rows_out, 1, 1);
+      counts_mat.AddRowRanges(in_value.ColRange(0, 1),
+        indexes->forward_indexes);
+    }
+    // Divide the output derivative by the counts.  This is what we want as it
+    // concerns the mean and x^2 stats.  As for the counts themselves, the
+    // derivative will end up being discarded when we backprop to the
+    // StatisticsExtractionComponent (as the count is not differentiable) so it
+    // doesn't really matter.
+    out_deriv.DivRowsVec(counts);
   }
-  // Divide the output derivative by the counts.  This is what we want as it
-  // concerns the mean and x^2 stats.  As for the counts themselves, the
-  // derivative will end up being discarded when we backprop to the
-  // StatisticsExtractionComponent (as the count is not differentiable) so it
-  // doesn't really matter.
-  out_deriv.DivRowsVec(counts);
 
   // Now propagate the derivative back to the input.  we don't propagate it
   // back for the count's row since it's non-differentiable.

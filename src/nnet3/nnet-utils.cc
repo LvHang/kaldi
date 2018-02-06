@@ -2,6 +2,7 @@
 
 // Copyright      2015  Johns Hopkins University (author: Daniel Povey)
 //                2016  Daniel Galvez
+//                      David Snyder
 //
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -24,6 +25,9 @@
 #include "nnet3/nnet-simple-component.h"
 #include "nnet3/nnet-general-component.h"
 #include "nnet3/nnet-convolutional-component.h"
+#include "nnet3/nnet-compute.h"
+#include "nnet3/nnet-optimize.h"
+#include "nnet3/nnet-example.h"
 #include "nnet3/nnet-parse.h"
 #include "nnet3/nnet-computation-graph.h"
 #include "nnet3/nnet-diagnostics.h"
@@ -472,6 +476,94 @@ std::string NnetInfo(const Nnet &nnet) {
   ostr << "# Nnet info follows.\n";
   ostr << nnet.Info();
   return ostr.str();
+}
+
+std::string SpMatrixOutputInfo(const Nnet &nnet) {
+  std::ostringstream os;
+  // The output 's' is vectorized SpMatrix.
+  std::string output_name = "s";
+  int32 node_index = nnet.GetNodeIndex(output_name);
+  if (node_index != -1 && nnet.IsOutputNode(node_index)) {
+    // Check that the output dim is of the form
+    // (1/2)*(d+1)*d.
+    int32 output_dim = nnet.OutputDim(output_name);
+    int32 d = (0.5) * (1 + sqrt(1 + 8 * output_dim)) - 1;
+    if (((d + 1) * d) / 2 == output_dim) {
+      SpMatrix<BaseFloat> S(d);
+      Vector<BaseFloat> s_vec(output_dim);
+      GetConstantOutput(nnet, output_name, &s_vec);
+      S.CopyFromVec(s_vec);
+      Vector<BaseFloat> s(d);
+      Matrix<BaseFloat> P(d, d);
+      S.Eig(&s, &P);
+      SortSvd(&s, &P);
+      os << "Eigenvalues of output 's': " << s;
+    }
+  }
+  return os.str();
+}
+
+void GetConstantOutput(const Nnet &nnet_const, const std::string &output_name,
+    Vector<BaseFloat> *output) {
+  Nnet nnet(nnet_const);
+  std::string input_name = "input";
+  int32 left_context,
+        right_context,
+        input_node_index = nnet.GetNodeIndex(input_name),
+        output_node_index = nnet.GetNodeIndex(output_name);
+  if (output_node_index == -1 && !nnet.IsOutputNode(output_node_index))
+    KALDI_ERR << "No output node called '" << output_name
+              << "' in the network.";
+  if (input_node_index == -1 && nnet.IsInputNode(input_node_index))
+    KALDI_ERR << "No input node called '" << input_name
+              << "' in the network.";
+  KALDI_ASSERT(output->Dim() == nnet.OutputDim(output_name));
+  ComputeSimpleNnetContext(nnet, &left_context, &right_context);
+
+  // It's difficult to get the output of the node
+  // directly.  Instead, we can create some fake input,
+  // propagate it through the network, and read out the
+  // output.
+  CuMatrix<BaseFloat> cu_feats(left_context + right_context + 1,
+      nnet.InputDim(input_name));
+  Matrix<BaseFloat> feats(cu_feats);
+
+  ComputationRequest request;
+  NnetIo nnet_io = NnetIo(input_name, 0, feats);
+  request.inputs.clear();
+  request.outputs.clear();
+  request.inputs.resize(1);
+  request.outputs.resize(1);
+  request.need_model_derivative = false;
+  request.store_component_stats = false;
+
+  std::vector<Index> output_indexes;
+  request.inputs[0].name = input_name;
+  request.inputs[0].indexes = nnet_io.indexes;
+  request.inputs[0].has_deriv = false;
+  output_indexes.resize(1);
+  output_indexes[0].n = 0;
+  output_indexes[0].t = 0;
+  request.outputs[0].name = output_name;
+  request.outputs[0].indexes = output_indexes;
+  request.outputs[0].has_deriv = false;
+
+  CachingOptimizingCompiler compiler(nnet, NnetOptimizeOptions());
+  const NnetComputation *computation = compiler.Compile(request);
+  NnetComputer computer(NnetComputeOptions(), *computation,
+                        nnet, &nnet);
+
+  // check to see if something went wrong.
+  if (request.inputs.empty())
+    KALDI_ERR << "No input in computation request.";
+  if (request.outputs.empty())
+    KALDI_ERR << "No output in computation request.";
+
+  computer.AcceptInput("input", &cu_feats);
+  computer.Forward();
+  const CuMatrixBase<BaseFloat> &output_mat = computer.GetOutput(output_name);
+  CuSubVector<BaseFloat> output_vec(output_mat, 0);
+  output->CopyFromVec(output_vec);
 }
 
 void SetDropoutProportion(BaseFloat dropout_proportion,

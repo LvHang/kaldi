@@ -178,7 +178,7 @@ void PackedMatrix<float>::CopyFromPacked(const PackedMatrix<float> &orig);
 
 template<typename Real>
 template<typename OtherReal>
-void PackedMatrix<Real>::CopyFromVec(const SubVector<OtherReal> &vec) {
+void PackedMatrix<Real>::CopyFromVec(const VectorBase<OtherReal> &vec) {
   MatrixIndexT size = (NumRows()*(NumRows()+1)) / 2;
   KALDI_ASSERT(vec.Dim() == size);
   if (sizeof(Real) == sizeof(OtherReal)) {
@@ -193,13 +193,13 @@ void PackedMatrix<Real>::CopyFromVec(const SubVector<OtherReal> &vec) {
 
 // template instantiations.
 template
-void PackedMatrix<float>::CopyFromVec(const SubVector<double> &orig);
+void PackedMatrix<float>::CopyFromVec(const VectorBase<double> &orig);
 template
-void PackedMatrix<double>::CopyFromVec(const SubVector<float> &orig);
+void PackedMatrix<double>::CopyFromVec(const VectorBase<float> &orig);
 template
-void PackedMatrix<double>::CopyFromVec(const SubVector<double> &orig);
+void PackedMatrix<double>::CopyFromVec(const VectorBase<double> &orig);
 template
-void PackedMatrix<float>::CopyFromVec(const SubVector<float> &orig);
+void PackedMatrix<float>::CopyFromVec(const VectorBase<float> &orig);
 
 
 

@@ -564,6 +564,7 @@ int32 NnetComputer::GetIoMatrixIndex(const std::string &node_name, bool is_outpu
       pending_commands_.push_back(program_counter_);
     program_counter_++;
   }
+<<<<<<< HEAD
   for (size_t i = 0; i < pending_commands_.size(); i++) {
     int32 command = pending_commands_[i];
     bool this_command_is_output =
@@ -589,6 +590,32 @@ int32 NnetComputer::GetIoMatrixIndex(const std::string &node_name, bool is_outpu
             << "for network node " << node_name
             << " (it is not expected at this point in the computation)";
   return 0;  // Suppress compiler warnings; this line will never be reached.
+}
+
+void NnetComputer::CheckInputs(bool check_output_deriv) const {
+  unordered_map<int32, std::pair<int32, int32> >::const_iterator
+      iter = computation_.input_output_info.begin(),
+      end = computation_.input_output_info.end();
+  for (; iter != end; ++iter) {
+    int32 node_index = iter->first,
+      value_matrix_index = iter->second.first,
+      deriv_matrix_index = iter->second.second;
+    std::string name = nnet_.GetNodeName(node_index);
+    if (nnet_.IsOutputNode(node_index)) {
+      if (check_output_deriv && deriv_matrix_index > 0) {
+        KALDI_ASSERT(static_cast<size_t>(deriv_matrix_index) < matrices_.size());
+        if (matrices_[deriv_matrix_index].NumRows() == 0)
+          KALDI_WARN << "Output-derivative required but not provided for node '"
+                    << name << "'.";
+      }
+    } else {
+      if (!check_output_deriv) {
+        if (matrices_[value_matrix_index].NumRows() == 0)
+          KALDI_ERR << "Input required but not provided for node '"
+                    << name << "'.";
+      }
+    }
+  }
 }
 
 

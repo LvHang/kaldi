@@ -1402,7 +1402,7 @@ template<typename Real>
 void CuMatrixBase<Real>::AddMatDiagVec(
     const Real alpha,
     const CuMatrixBase<Real> &M, MatrixTransposeType transM,
-    CuVectorBase<Real> &v,
+    const CuVectorBase<Real> &v,
     Real beta) {
 #if HAVE_CUDA == 1
   if (CuDevice::Instantiate().Enabled()) {

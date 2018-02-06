@@ -3,6 +3,7 @@
 // Copyright      2015  Johns Hopkins University (author: Daniel Povey)
 //                2015  Guoguo Chen
 //                2015  Daniel Galvez
+//                2016  David Snyder
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -2823,6 +2824,7 @@ void ConstantFunctionComponent::Read(std::istream &is, bool binary) {
   ExpectToken(is, binary, "</ConstantFunctionComponent>");
 }
 
+
 void ConstantFunctionComponent::Write(std::ostream &os, bool binary) const {
   WriteUpdatableCommon(os, binary);  // Write the opening tag and learning rate
   WriteToken(os, binary, "<InputDim>");
@@ -2880,20 +2882,39 @@ void ConstantFunctionComponent::InitFromConfig(ConfigLine *cfl) {
   int32 output_dim = 0;
   InitLearningRatesFromConfig(cfl);
   bool ok = cfl->GetValue("output-dim", &output_dim) &&
-      cfl->GetValue("input-dim", &input_dim_);
+            cfl->GetValue("input-dim", &input_dim_),
+       init_diag = false;
   cfl->GetValue("is-updatable", &is_updatable_);
   cfl->GetValue("use-natural-gradient", &use_natural_gradient_);
   BaseFloat output_mean = 0.0, output_stddev = 0.0;
   cfl->GetValue("output-mean", &output_mean);
   cfl->GetValue("output-stddev", &output_stddev);
+  cfl->GetValue("init-diag-spmat", &init_diag);
   if (!ok || cfl->HasUnusedValues() || input_dim_ <= 0 ||
       output_dim <= 0) {
     KALDI_ERR << "Bad initializer " << cfl->WholeLine();
   }
+
   Vector<BaseFloat> output(output_dim);
-  output.SetRandn();
-  output.Scale(output_stddev);
-  output.Add(output_mean);
+  if (init_diag) {
+    int32 d = (0.5) * (1 + sqrt(1 + 8 * output_dim)) - 1;
+    if (((d + 1) * d) / 2 != output_dim) {
+      KALDI_ERR << "Config init-diag-spmat=true is only valid if the output"
+                << "can be interpreted as an SpMatrix.";
+    }
+    SpMatrix<BaseFloat> output_spmat(d);;
+    Vector<BaseFloat> diag(d);
+    diag.SetRandn();
+    diag.Scale(output_stddev);
+    diag.Add(output_mean);
+    output_spmat.AddDiagVec(1.0, diag);
+    SubVector<BaseFloat> sub_output(output_spmat);
+    output.CopyFromVec(sub_output);
+  } else {
+    output.SetRandn();
+    output.Scale(output_stddev);
+    output.Add(output_mean);
+  }
   output_ = output;
 }
 
@@ -3902,7 +3923,6 @@ void FixedScaleComponent::Init(const CuVectorBase<BaseFloat> &scales) {
   scales_ = scales;
 }
 
-
 void FixedScaleComponent::InitFromConfig(ConfigLine *cfl) {
   std::string filename;
   // Accepts "scales" config (for filename) or "dim" -> random init, for testing.
@@ -3934,7 +3954,7 @@ void FixedScaleComponent::InitFromConfig(ConfigLine *cfl) {
 
 std::string FixedScaleComponent::Info() const {
   std::ostringstream stream;
-  stream << Component::Info();
+  stream << Component::Info() << ", ";
   PrintParameterStats(stream, "scales", scales_, true);
   return stream.str();
 }
@@ -8018,6 +8038,261 @@ void SumBlockComponent::Backprop(
   if (in_deriv) {
     in_deriv->AddMatBlocks(scale_, out_deriv, kNoTrans);
   }
+
+void XvectorComponent::Resize(
+    int32 input_dim, int32 output_dim) {
+  input_dim_ = input_dim;
+  output_dim_ = output_dim;
+  KALDI_ASSERT(input_dim > 1 && output_dim > 1);
+  D_.Resize(output_dim, input_dim);
+  s_.Resize(input_dim);
+}
+
+void XvectorComponent::Read(std::istream &is, bool binary) {
+  ReadUpdatableCommon(is, binary);  // Read the opening tag and learning rate
+  ExpectToken(is, binary, "<D>");
+  D_.Read(is, binary);
+  ExpectToken(is, binary, "<s>");
+  s_.Read(is, binary);
+  input_dim_ = D_.NumCols();
+  output_dim_ = D_.NumRows();
+  ExpectToken(is, binary, "</XvectorComponent>");
+}
+
+void XvectorComponent::InitFromConfig(ConfigLine *cfl) {
+  bool ok = true;
+  InitLearningRatesFromConfig(cfl);
+  int32 input_dim, output_dim;
+  ok = ok && cfl->GetValue("input-dim", &input_dim);
+  ok = ok && cfl->GetValue("output-dim", &output_dim);
+  BaseFloat D_stddev = 1.0 / std::sqrt(input_dim),
+            s_stddev = 1.0 / std::sqrt(input_dim),
+            D_mean = 0.0, s_mean = 0.0;
+
+  cfl->GetValue("d-stddev", &D_stddev);
+  cfl->GetValue("s-stddev", &s_stddev);
+  cfl->GetValue("d-mean", &D_mean);
+  cfl->GetValue("s-mean", &s_mean);
+  if (cfl->HasUnusedValues())
+    KALDI_ERR << "Could not process these elements in initializer: "
+              << cfl->UnusedValues();
+  if (!ok)
+    KALDI_ERR << "Bad initializer " << cfl->WholeLine();
+
+  Init(input_dim, output_dim, D_stddev, s_stddev, D_mean, s_mean);
+}
+
+void XvectorComponent::Init(
+    int32 input_dim, int32 output_dim, BaseFloat D_stddev,
+    BaseFloat s_stddev, BaseFloat D_mean, BaseFloat s_mean) {
+  input_dim_ = input_dim;
+  output_dim_ = output_dim;
+  D_.Resize(output_dim, input_dim);
+  s_.Resize(input_dim);
+  KALDI_ASSERT(output_dim > 0 && input_dim > 0 && D_stddev >= 0.0
+               && s_stddev >= 0);
+  D_.SetRandn(); // sets to random normally distributed noise.
+  D_.Scale(D_stddev);
+  s_.SetRandn();
+  s_.Scale(s_stddev);
+  D_.Add(D_mean);
+  s_.Add(s_mean);
+}
+
+void XvectorComponent::Write(std::ostream &os,
+                             bool binary) const {
+  WriteUpdatableCommon(os, binary);  // Write the opening tag and learning rate
+  WriteToken(os, binary, "<D>");
+  D_.Write(os, binary);
+  WriteToken(os, binary, "<s>");
+  s_.Write(os, binary);
+  WriteToken(os, binary, "</XvectorComponent>");
+}
+
+std::string XvectorComponent::Info() const {
+  std::ostringstream stream;
+  stream << UpdatableComponent::Info();
+  PrintParameterStats(stream, "d", D_);
+  PrintParameterStats(stream, "s", s_);
+  return stream.str();
+}
+
+Component* XvectorComponent::Copy() const {
+  return new XvectorComponent(*this);
+}
+
+XvectorComponent::XvectorComponent(
+    const XvectorComponent &other):
+    UpdatableComponent(other),
+    input_dim_(other.input_dim_),
+    output_dim_(other.output_dim_),
+    D_(other.D_),
+    s_(other.s_) { }
+
+void XvectorComponent::Scale(BaseFloat scale) {
+  D_.Scale(scale);
+  s_.Scale(scale);
+}
+
+int32 XvectorComponent::NumParameters() const {
+  return input_dim_ * (output_dim_ + 1);
+}
+
+void XvectorComponent::Add(BaseFloat alpha, const Component &other_in) {
+  const XvectorComponent *other =
+    dynamic_cast<const XvectorComponent *>(&other_in);
+  KALDI_ASSERT(other != NULL);
+  D_.AddMat(alpha, other->D_);
+  s_.AddVec(alpha, other->s_);
+}
+
+void XvectorComponent::Propagate(const ComponentPrecomputedIndexes *indexes,
+                                const CuMatrixBase<BaseFloat> &in,
+                                 CuMatrixBase<BaseFloat> *out) const {
+  for (int32 i = 0; i < in.NumRows(); i++) {
+    CuMatrix<BaseFloat> A(output_dim_, input_dim_),
+                        C(output_dim_, input_dim_),
+                        Quad(output_dim_, output_dim_),
+                        Quad_inv(output_dim_, output_dim_);
+    CuVector<BaseFloat> linear(output_dim_),
+                        x(in.Row(i)),
+                        y(output_dim_);
+    // Quad is the term (I + D * diag(x) * D') and Quad_inv is its inverse.
+    A.AddMatDiagVec(1.0, D_, kNoTrans, x, 0.0);
+    Quad.AddMatMat(1.0, A, kNoTrans, D_, kTrans, 0.0);
+    Quad.AddToDiag(1.0);
+    Matrix<BaseFloat> Quad_inv_tmp(Quad);
+    Quad_inv_tmp.Invert();
+    Quad_inv.CopyFromMat(Quad_inv_tmp);
+    // linear is the linear term D * diag(s) * x
+    C.AddMatDiagVec(1.0, D_, kNoTrans, s_, 0.0);
+    linear.AddMatVec(1.0, C, kNoTrans, x, 0.0);
+    y.AddMatVec(1.0, Quad_inv, kNoTrans, linear, 0.0);
+    out->Row(i).AddVec(1.0, y);
+  }
+}
+
+void XvectorComponent::Backprop(const std::string &debug_info,
+                              const ComponentPrecomputedIndexes *indexes,
+                              const CuMatrixBase<BaseFloat> &in_value,
+                              const CuMatrixBase<BaseFloat> &out_value,
+                              const CuMatrixBase<BaseFloat> &out_deriv,
+                              Component *to_update_in,
+                              CuMatrixBase<BaseFloat> *in_deriv) const {
+  XvectorComponent *to_update = dynamic_cast<XvectorComponent*>(to_update_in);
+  Matrix<BaseFloat> grad_D(output_dim_, input_dim_, kSetZero);
+  Vector<BaseFloat> grad_s(input_dim_, kSetZero);
+  for (int32 i = 0; i < in_value.NumRows(); i++) {
+    Vector<BaseFloat> x(in_value.Row(i)),
+                      z(out_deriv.Row(i)),
+                      v(output_dim_),
+                      u(input_dim_, kSetZero),
+                      w(output_dim_, kSetZero),
+                      l(output_dim_, kSetZero),
+                      m(input_dim_, kSetZero),
+                      s(s_),
+                      deriv_x(input_dim_, kSetZero);
+    Matrix<BaseFloat> Quad(output_dim_, output_dim_, kSetZero),
+                      Quad_inv(output_dim_, output_dim_, kSetZero),
+                      A(output_dim_, input_dim_, kSetZero),
+                      D(D_),
+                      V(output_dim_, input_dim_, kSetZero),
+                      P(output_dim_, output_dim_, kSetZero),
+                      W(output_dim_, output_dim_, kSetZero),
+                      S(output_dim_, output_dim_, kSetZero),
+                      R(input_dim_, output_dim_, kSetZero),
+                      T(input_dim_, output_dim_, kSetZero),
+                      U(input_dim_, output_dim_, kSetZero);
+
+  A.AddMatDiagVec(1.0, D, kNoTrans, x, kNoTrans);
+    Quad.AddMatMat(1.0, A, kNoTrans, D, kTrans, 0.0);
+    Quad.AddToDiag(1.0);
+    Quad_inv.CopyFromMat(Quad);
+    Quad_inv.Invert();
+    V.AddMatDiagVec(1.0, D, kNoTrans, s, 0.0);
+
+    // where v = D * diag(s) * x
+    v.AddMatVec(1.0, V, kNoTrans, x, 0.0);
+    W.AddVecVec(1.0, v, z);
+    W.AddVecVec(1.0, z, v);
+    S.AddMatMat(1.0, Quad_inv, kNoTrans, W, kNoTrans, 0.0);
+    P.AddMatMat(-0.5, S, kNoTrans, Quad_inv, kNoTrans, 0.0);
+
+    // deriv of D from Quadratic term is T = 2*diag(x) * D' * P
+    // deriv of D from linear term is  w * u' = z' * Q^{-1} * s * x
+    R.AddDiagVecMat(2.0, x, D, kTrans);
+    T.AddMatMat(1.0, R, kNoTrans, P, kNoTrans, 0.0);
+
+    // Do linear part of D
+    // w = z' * Quad^{-1}
+    w.AddMatVec(1.0, Quad_inv, kNoTrans, z, 0.0);
+    // u = s * x
+    u.AddVecVec(1.0, s, x, 0.0);
+    grad_D.AddVecVec(1.0, w, u);
+    grad_D.AddMat(1.0, T, kTrans);
+
+    // Do linear part of s
+    l.AddMatVec(1.0, Quad_inv, kNoTrans, z, 0.0);
+    m.AddMatVec(1.0, D, kTrans, l, 0.0);
+    grad_s.AddVecVec(1.0, m, x, 1.0);
+
+    if (in_deriv) {
+      // deriv of x from inverse part is diag(D' * P * D)
+      // deriv of x from linear part is w * D * diag(s) = z' * Q^{-1} * D * diag(s)
+      U.AddMatMat(1.0, D, kTrans, P, kNoTrans, 0.0);
+      deriv_x.AddMatVec(1.0, V, kTrans, w, 1.0);
+      deriv_x.AddDiagMatMat(1.0, U, kNoTrans, D, kNoTrans, 1.0); // Quadratic part
+      in_deriv->Row(i).AddVec(1.0, CuVector<BaseFloat>(deriv_x));
+    }
+  }
+  if (to_update != NULL) {
+    // Next update the model
+    to_update->Update(CuMatrix<BaseFloat>(grad_D),
+        CuVector<BaseFloat>(grad_s));
+  }
+}
+
+void XvectorComponent::Update(const CuMatrix<BaseFloat> &grad_D,
+const CuVector<BaseFloat> &grad_s) {
+  D_.AddMat(learning_rate_, grad_D);
+  s_.AddVec(learning_rate_, grad_s);
+}
+
+void XvectorComponent::PerturbParams(BaseFloat stddev) {
+  CuMatrix<BaseFloat> temp_D(D_);
+  CuVector<BaseFloat> temp_s(s_);
+  temp_D.SetRandn();
+  temp_s.SetRandn();
+  D_.AddMat(stddev, temp_D);
+  s_.AddVec(stddev, temp_s);
+}
+
+void XvectorComponent::SetZero(bool treat_as_gradient) {
+  if (treat_as_gradient) {
+    SetActualLearningRate(1.0);
+    is_gradient_ = true;
+  }
+  D_.SetZero();
+  s_.SetZero();
+}
+
+BaseFloat XvectorComponent::DotProduct(const UpdatableComponent &other_in) const {
+  const XvectorComponent *other =
+      dynamic_cast<const XvectorComponent*>(&other_in);
+  return TraceMatMat(D_, other->D_, kTrans)
+      + VecVec(s_, other->s_);
+}
+
+void XvectorComponent::Vectorize(VectorBase<BaseFloat> *params) const {
+  KALDI_ASSERT(params->Dim() == NumParameters());
+  params->Range(0, input_dim_ * output_dim_).CopyRowsFromMat(D_);
+  params->Range(input_dim_ * output_dim_, input_dim_).CopyFromVec(s_);
+}
+
+void XvectorComponent::UnVectorize(const VectorBase<BaseFloat> &params) {
+  KALDI_ASSERT(params.Dim() == NumParameters());
+  D_.CopyRowsFromVec(params.Range(0, input_dim_ * output_dim_));
+  s_.CopyFromVec(params.Range(input_dim_ * output_dim_, input_dim_));
 }
 
 

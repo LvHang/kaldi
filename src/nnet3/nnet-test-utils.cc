@@ -1515,7 +1515,7 @@ static void GenerateRandomComponentConfig(std::string *component_type,
     }
     case 12: {
       *component_type = "FixedScaleComponent";
-      os << "dim=" << RandInt(1, 100);
+      os << "dim=" << RandInt(1, 100) << " scale=" << RandInt(1, 10);
       break;
     }
     case 13: {
@@ -1807,6 +1807,13 @@ static void GenerateRandomComponentConfig(std::string *component_type,
       int32 input_dim = RandInt(1, 50), output_dim = RandInt(1, 50);
       os << "input-dim=" << input_dim << " output-dim=" << output_dim
          << " learning-rate=" << learning_rate;
+      break;
+    }
+    case 30: {
+      *component_type = "XvectorComponent";
+      int32 input_dim = RandInt(2, 100);
+      int32 output_dim = RandInt(1, input_dim);
+      os << "input-dim=" << input_dim << " output-dim=" << output_dim;
       break;
     }
     default:

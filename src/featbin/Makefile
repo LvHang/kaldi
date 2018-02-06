@@ -19,7 +19,6 @@ BINFILES = add-deltas add-deltas-sdc append-post-to-feats \
            subset-feats transform-feats wav-copy wav-reverberate \
            wav-to-duration compute-raw-frame-feats \
            compute-gamma-filter
-
 OBJFILES =
 
 TESTFILES =

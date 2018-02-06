@@ -23,4 +23,5 @@ ${KALDI_ROOT}/src/sgmm2bin:\
 ${KALDI_ROOT}/src/sgmmbin:\
 ${KALDI_ROOT}/src/tfrnnlmbin:\
 ${KALDI_ROOT}/src/fvectorbin:\
+${KALDI_ROOT}/src/xvectorbin:\
 $PATH

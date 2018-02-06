@@ -85,7 +85,6 @@ foreach my $actual_storage (@all_actual_storage) {
   if (! $ret) {
     print STDERR "Error linking $actual_storage to $pseudo_storage\n";
   }
-
   $index++;
 }
 

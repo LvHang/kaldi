@@ -7,6 +7,7 @@
 //           2014-2015  Guoguo Chen
 //                2015  Daniel Galvez
 //                2015  Tom Ko
+//                2016  David Snyder
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -461,6 +462,7 @@ class PerElementScaleComponent;
 class PerElementOffsetComponent;
 class PowerComponent;
 class GmmComponent;
+class XvectorComponent;
 
 // Affine means a linear function plus an offset.
 // Note: although this class can be instantiated, it also
@@ -1162,8 +1164,10 @@ class FixedScaleComponent: public Component {
 
   void Init(const CuVectorBase<BaseFloat> &scales);
 
-  // The ConfigLine cfl contains only the option scales=<string>,
-  // where the string is the filename of a Kaldi-format matrix to read.
+  // The ConfigLine cfl will contain either theoption scales=<string>, where the
+  // string is the filename of a Kaldi-format matrix to read, or dim=d and
+  // scale=xx, where d is an integer >0 and xx is a floating-point value (all
+  // the scales will be set to the same value).
   virtual void InitFromConfig(ConfigLine *cfl);
 
   virtual int32 InputDim() const { return scales_.Dim(); }
@@ -1509,6 +1513,7 @@ class PermuteComponent: public Component {
 
 // PerElementScaleComponent scales each dimension of its input with a separate
 // trainable scale; it's like a linear component with a diagonal matrix.
+// See also FixedPerElementScaleComponent.
 class PerElementScaleComponent: public UpdatableComponent {
  public:
   virtual int32 InputDim() const { return scales_.Dim(); }
@@ -3067,6 +3072,64 @@ class CompositeComponent: public UpdatableComponent {
   std::vector<Component*> components_;
 
 };
+
+// TODO
+class XvectorComponent: public UpdatableComponent {
+ public:
+  XvectorComponent() { };
+  void Init(int32 input_dim, int32 output_dim, BaseFloat D_stddev,
+            BaseFloat s_stddev, BaseFloat D_mean, BaseFloat s_mean);
+  virtual int32 Properties() const {
+    return kSimpleComponent|kUpdatableComponent|
+        kBackpropNeedsInput|kBackpropAdds|
+        kPropagateAdds|kInputPositive;
+  }
+  virtual void Resize(int32 input_dim, int32 output_dim);
+  virtual std::string Type() const { return "XvectorComponent"; }
+  virtual void InitFromConfig(ConfigLine *cfl);
+  virtual int32 InputDim() const { return input_dim_; }
+  virtual int32 OutputDim() const { return output_dim_; }
+  virtual void Vectorize(VectorBase<BaseFloat> *params) const;
+  virtual void UnVectorize(const VectorBase<BaseFloat> &params);
+  virtual int32 NumParameters() const;
+  virtual void Scale(BaseFloat scale);
+  virtual void Add(BaseFloat alpha, const Component &other);
+  // TODO: This is a simple CPU version for now
+  virtual void Propagate(const ComponentPrecomputedIndexes *indexes,
+                         const CuMatrixBase<BaseFloat> &in,
+                         CuMatrixBase<BaseFloat> *out) const;
+  // TODO: This is a simple CPU version for now
+  virtual void Backprop(const std::string &debug_info,
+                        const ComponentPrecomputedIndexes *indexes,
+                        const CuMatrixBase<BaseFloat> &in_value,
+                        const CuMatrixBase<BaseFloat> &out_value,
+                        const CuMatrixBase<BaseFloat> &out_deriv,
+                        Component *to_update,
+                        CuMatrixBase<BaseFloat> *in_deriv) const;
+  virtual void SetZero(bool treat_as_gradient);
+  virtual void PerturbParams(BaseFloat stddev);
+  virtual BaseFloat DotProduct(const UpdatableComponent &other) const;
+  virtual Component* Copy() const;
+  virtual std::string Info() const;
+
+  virtual void Read(std::istream &is, bool binary); // This Read function
+  // requires that the Component has the correct type.
+
+  /// Write component to stream
+  virtual void Write(std::ostream &os, bool binary) const;
+  void Update(const CuMatrix<BaseFloat> &grad_D,
+              const CuVector<BaseFloat> &grad_s);
+  explicit XvectorComponent(const XvectorComponent &other);
+ protected:
+  int32 input_dim_;
+  int32 output_dim_;
+  CuMatrix<BaseFloat> D_;
+  CuVector<BaseFloat> s_;
+ private:
+  const XvectorComponent &operator=(
+      const XvectorComponent &other); // Disallow.
+};
+
 
 
 } // namespace nnet3

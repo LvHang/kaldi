@@ -185,6 +185,10 @@ class Nnet {
   /// returns individual node name.
   const std::string &GetNodeName(int32 node_index) const;
 
+  /// TODO probably redundant with the next function, remove later
+  void RenameOutputNode(const std::string &old_name,
+    const std::string &new_name);
+
   /// This can be used to modify invidual node names.  Note, this does not
   /// affect the neural net structure at all, it just assigns a new
   /// name to an existing node while leaving all connections identical.
@@ -273,6 +277,8 @@ class Nnet {
   // accepted as the config-file format.
   void GetConfigLines(bool include_dim,
                       std::vector<std::string> *config_lines) const;
+  // random components.  You must also set srand() for this to be
+  // effective.
 
  private:
 

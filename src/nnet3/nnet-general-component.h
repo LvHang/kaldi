@@ -306,25 +306,27 @@ class StatisticsExtractionComponentPrecomputedIndexes:
 
 /*
   Class StatisticsPoolingComponent is used together with
-  StatisticsExtractionComponent to extract moving-average mean and
+  StatisticsExtractionComponent to extract moving-average mean (or sum), and
   standard-deviation statistics.
 
   StatisticsPoolingComponent pools the stats over a specified window and
   computes means and possibly log-count and stddevs from them for you.
 
  # In StatisticsPoolingComponent, the first element of the input is interpreted
- # as a count, which we divide by.
- # Optionally the log of the count can be output, and you can allow it to be
- # repeated several times if you want (useful for systems using the jesus-layer).
- # The output dimension is equal to num-log-count-features plus (input-dim - 1).
+ # as a count, which we, by default, divide by.  If output-sum==true, then it expects
+ # that output-stddevs==false and we forgo the division by the count and output the sum.
+ # Optionally, the log of the count can be output, and you can allow it to be repeated
+ # several times if you want (useful for systems using the jesus-layer).  The output
+ # dimension is equal to num-log-count-features plus (input-dim - 1).
 
  # If include-log-count==false, the output dimension is the input dimension minus one.
- # If output-stddevs=true, then it expects the input-dim to be of the form 2n+1 where n is
- #  presumably the original feature dim, and it interprets the last n dimensions of the feature
- #  as a variance; it outputs the square root of the variance instead of the actual variance.
+ # If output-stddevs==true, then it expects that output-sum==false and the input-dim to
+ # be of the form 2n+1 where n is presumably the original feature dim, and it interprets
+ # the last n dimensions of the feature as a variance; it outputs the square root of the
+ # variance instead of the actual variance.
 
  configs and their defaults:  input-dim=-1, input-period=1, left-context=-1, right-context=-1,
-    num-log-count-features=0, output-stddevs=true, variance-floor=1.0e-10
+    num-log-count-features=0, output-stddevs=true, variance-floor=1.0e-10, output-sum=false
 
  You'd access the output of the StatisticsPoolingComponent using rounding, e.g.
   Round(component-name, 10)
@@ -410,6 +412,7 @@ class StatisticsPoolingComponent: public Component {
   int32 right_context_;
   int32 num_log_count_features_;
   bool output_stddevs_;
+  bool output_sum_;
   BaseFloat variance_floor_;
 };
 

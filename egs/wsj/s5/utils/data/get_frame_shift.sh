@@ -5,10 +5,12 @@
 
 # This script takes as input a data directory, such as data/train/, preferably
 # with utt2dur file already existing (or the utt2dur file will be created if
-# not), and it attempts to work out the approximate frame shift by comparing the
+# not), and it attempts to work out the frame shift by comparing the utt2dur
+# with the output of feat-to-len on the feats.scp.  It prints it out.  If the
 # utt2dur with the output of feat-to-len on the feats.scp.  It prints it out.
 # if the shift is very close to, but above, 0.01 (the normal frame shift) it
 # rounds it down.
+
 
 . utils/parse_options.sh
 . ./path.sh

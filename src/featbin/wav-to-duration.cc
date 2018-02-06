@@ -56,7 +56,6 @@ int main(int argc, char *argv[]) {
         min_duration = std::numeric_limits<BaseFloat>::infinity(),
         max_duration = 0;
     int32 num_done = 0;
-
     BaseFloatWriter duration_writer(duration_wspecifier);
     if (read_entire_file) {
       SequentialTableReader<WaveHolder> wav_reader(wav_rspecifier);

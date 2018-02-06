@@ -97,7 +97,7 @@ template<typename Real> class PackedMatrix {
   /// as the packed matrix.  Must have the same dimension, i.e.
   /// orig.Dim() == (NumRows()*(NumRows()+1)) / 2;
   template<typename OtherReal>
-  void CopyFromVec(const SubVector<OtherReal> &orig);
+  void CopyFromVec(const VectorBase<OtherReal> &orig);
   
   Real* Data() { return data_; }
   const Real* Data() const { return data_; }

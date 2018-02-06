@@ -20,6 +20,7 @@
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
 #include "nnet3/nnet-nnet.h"
+#include "nnet3/nnet-utils.h"
 
 int main(int argc, char *argv[]) {
   try {
@@ -51,6 +52,7 @@ int main(int argc, char *argv[]) {
     ReadKaldiObject(raw_nnet_rxfilename, &nnet);
 
     std::cout << nnet.Info();
+    std::cout << SpMatrixOutputInfo(nnet);
 
     return 0;
   } catch(const std::exception &e) {

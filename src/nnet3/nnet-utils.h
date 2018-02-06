@@ -157,7 +157,8 @@ void FreezeNaturalGradient(bool freeze, Nnet *nnet);
 void ConvertRepeatedToBlockAffine(Nnet *nnet);
 
 /// This function returns various info about the neural net.
-/// If the nnet satisfied IsSimpleNnet(nnet), the info includes "left-context=5\nright-context=3\n...".  The info includes
+/// If the nnet satisfied IsSimpleNnet(nnet), the info includes
+/// "left-context=5\nright-context=3\n...".  The info includes
 /// the output of nnet.Info().
 /// This is modeled after the info that AmNnetSimple returns in its
 /// Info() function (we need this in the CTC code).

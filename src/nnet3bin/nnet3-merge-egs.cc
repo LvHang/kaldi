@@ -60,7 +60,6 @@ int main(int argc, char *argv[]) {
 
     ExampleMergingConfig merging_config;
     merging_config.Register(&po);
-
     po.Read(argc, argv);
 
     if (po.NumArgs() != 2) {
