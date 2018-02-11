@@ -449,7 +449,6 @@ void Compiler::ComputeInputLocationsList(
   const std::vector<Index> &output_indexes = step_info.output_indexes;
   const NetworkNode &node = nnet_.GetNode(step_info.node_index);
   const SumDescriptor &descriptor = node.descriptor.Part(part_index);
-
   int32 num_indexes = output_indexes.size();
   submat_locations_list->clear();
   submat_locations_list->resize(num_indexes);
@@ -609,6 +608,7 @@ BaseFloat Compiler::SplitByScale(
     }
   }
 
+  int32 num_rows = input_locations_list.size();
   split_locations_lists->resize(alpha_to_nodes.size());
   // `step_to_index` will map from the step-index to the index into
   // `split_locations_lists`; each index is associated with a different value of
@@ -623,6 +623,7 @@ BaseFloat Compiler::SplitByScale(
       BaseFloat alpha = iter->first;
       const std::vector<int32> &nodes = iter->second;
       (*split_locations_lists)[split_locations_index].first = alpha;
+      (*split_locations_lists)[split_locations_index].second.resize(num_rows);
       for (size_t i = 0; i < nodes.size(); i++) {
         int32 node_index = nodes[i];
         KALDI_ASSERT(node_to_steps.count(node_index) != 0);
@@ -639,7 +640,6 @@ BaseFloat Compiler::SplitByScale(
 
   {  // This block populates 'split_locations_lists[*].second' with the
      // split-by-alpha version of 'input_locations_list'
-    int32 num_rows = input_locations_list.size();
     for (int32 r = 0; r < num_rows; r++) {
       const std::vector<std::pair<int32,int32> > &this_list =
           input_locations_list[r];
@@ -664,6 +664,7 @@ void Compiler::CompileForwardSumDescriptor(
   int32 value_submatrix_index = step_info.value_parts[part_index];
   const SumDescriptor &descriptor =
       nnet_.GetNode(step_info.node_index).descriptor.Part(part_index);
+
   BaseFloat offset_term = descriptor.GetScaleForNode(-1);
   if (offset_term != 0.0) {
     computation->commands.push_back(
@@ -763,10 +764,10 @@ void Compiler::CompileForwardFromSubmatLocations(
   std::vector<int32> indexes;
   if (ConvertToIndexes(submat_locations, &input_submatrix_index, &indexes)) {
     CompileForwardFromIndexes(value_submatrix_index,
-                                    input_submatrix_index,
-                                    alpha,
-                                    indexes,
-                                    computation);
+                              input_submatrix_index,
+                              alpha,
+                              indexes,
+                              computation);
     return;
   } else {
     // There are multiple source matrices.
@@ -856,7 +857,7 @@ void Compiler::CompileBackwardSumDescriptor(
       BaseFloat this_alpha = split_locations_lists[i].first;
       KALDI_ASSERT(this_alpha - this_alpha == 0.0);
       std::vector<std::vector<std::pair<int32, int32> > > submat_locations_list;
-      ComputeValueSubmatLocationsList(split_locations_lists[i].second,
+      ComputeDerivSubmatLocationsList(split_locations_lists[i].second,
                                       &submat_locations_list);
       CompileBackwardFromSubmatLocationsList(deriv_submatrix_index,
                                              this_alpha,

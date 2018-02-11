@@ -434,9 +434,8 @@ def train(args, run_opts):
                 models_to_combine=models_to_combine, egs_dir=egs_dir,
                 minibatch_size_str=args.minibatch_size, run_opts=run_opts,
                 get_raw_nnet_from_am=False,
-                sum_to_one_penalty=args.combine_sum_to_one_penalty,
-                use_multitask_egs=use_multitask_egs,
-                regularize_factors=args.regularize_factors)
+                max_objective_evaluations=args.max_objective_evaluations,
+                use_multitask_egs=use_multitask_egs)
         else:
             common_lib.force_symlink("{0}.raw".format(num_iters),
                                      "{0}/final.raw".format(args.dir))

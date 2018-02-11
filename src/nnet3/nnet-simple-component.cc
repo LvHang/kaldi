@@ -396,6 +396,8 @@ void NormalizeComponent::Read(std::istream &is, bool binary) {
   if (token == "<AddLogStddev>") {
     ReadBasicType(is, binary, &add_log_stddev_);
     ReadToken(is, binary, &token);
+  } else {
+    add_log_stddev_ = false;
   }
   if (token == "<ValueAvg>") {
     // back-compatibility code.
@@ -823,7 +825,8 @@ void ClipGradientComponent::Backprop(const std::string &debug_info,
                                   kNoTrans, 0.0);
      // now clipping_scales contains the squared (norm of each row divided by
      //  clipping_threshold)
-      int32 num_not_scaled = clipping_scales.ApplyFloor(1.0);
+      int32 num_not_scaled;
+      clipping_scales.ApplyFloor(1.0, &num_not_scaled);
      // now clipping_scales contains min(1,
      //    squared-(norm/clipping_threshold))
       if (num_not_scaled != clipping_scales.Dim()) {
@@ -2950,8 +2953,8 @@ void NaturalGradientAffineComponent::Read(std::istream &is, bool binary) {
   }
   std::string token;
   ReadToken(is, binary, &token);
-  if (token != "<NaturalGradientAffineComponent>" &&
-      token != "</NaturalGradientAffineComponent>")
+  // the following has to handle a couple variants of
+  if (token.find("NaturalGradientAffineComponent>") == std::string::npos)
     KALDI_ERR << "Expected <NaturalGradientAffineComponent> or "
               << "</NaturalGradientAffineComponent>, got " << token;
   SetNaturalGradientConfigs();
@@ -7593,7 +7596,7 @@ void BatchNormComponent::InitFromConfig(ConfigLine *cfl) {
          x2sum = sum_i x(i)^2
           mean = xsum / n
            var = x2sum / n - (mean*mean)
-         scale = sqrt(var + epsilon)^{-0.5}
+         scale = (var + epsilon)^{-0.5}
         offset = -mean * scale
 
       y(i) = scale * x(i) + offset
@@ -7606,7 +7609,7 @@ void BatchNormComponent::InitFromConfig(ConfigLine *cfl) {
   We are given y'(i).  Propagating the derivatives backward:
      offset' = sum_i y'(i)
      scale' = (sum_i y'(i) * x(i)) - offset' * mean
-       var' = scale' * -0.5 * sqrt(var + epsilon)^{-1.5}
+       var' = scale' * -0.5 * (var + epsilon)^{-1.5}
             = -0.5 * scale' * scale^3
       mean' = -offset' * scale - 2 * mean * var'
       xsum' = mean' / n
