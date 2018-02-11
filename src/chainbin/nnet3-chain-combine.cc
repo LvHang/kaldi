@@ -152,20 +152,16 @@ int main(int argc, char *argv[]) {
 
     Nnet nnet;
     ReadKaldiObject(raw_nnet_rxfilename, &nnet);
-<<<<<<< HEAD
-
     if (batchnorm_test_mode)
       SetBatchnormTestMode(true, &nnet);
     if (dropout_test_mode)
       SetDropoutTestMode(true, &nnet);
     if (shift_input_test_mode)
       SetShiftInputTestMode(true, &nnet);
-=======
     Nnet moving_average_nnet(nnet), best_nnet(nnet);
     NnetComputeProbOptions compute_prob_opts;
     NnetChainComputeProb prob_computer(compute_prob_opts, chain_config,
         den_fst, moving_average_nnet);
->>>>>>> master
 
     std::vector<NnetChainExample> egs;
     egs.reserve(10000);  // reserve a lot of space to minimize the chance of
