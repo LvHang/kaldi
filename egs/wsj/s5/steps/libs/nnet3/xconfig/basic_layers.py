@@ -668,7 +668,9 @@ class XconfigBasicLayer(XconfigLayerBase):
                        'ng-affine-options': '',
                        'dropout-proportion': 0.5,  # dropout-proportion only
                                                    # affects layers with
-                                                   # 'dropout' in the name.
+                                                   # 'dropout' in the name
+                       'dropout-per-dim': False,  # if dropout-per-dim=true, the dropout
+                                                  # mask is shared across time.
                        'add-log-stddev': False,
                        # the following are not really inspected by this level of
                        # code, just passed through (but not if left at '').
@@ -813,11 +815,6 @@ class XconfigBasicLayer(XconfigLayerBase):
                         ' type=ScaleAndOffsetComponent dim={2} max-change=0.5 '
                         ''.format(self.name, nonlinearity, output_dim))
 
-            elif nonlinearity == 'dropout':
-                line = ('component name={0}.{1} type=DropoutComponent '
-                           'dim={2} dropout-proportion={3}'.format(
-                               self.name, nonlinearity, output_dim,
-                               self.config['dropout-proportion']))
             elif nonlinearity == 'power':
                 line = ('component name={0}.{1} type=PowerComponent '
                         'dim={2} block-dim=1 max-change={3} '
@@ -825,6 +822,33 @@ class XconfigBasicLayer(XconfigLayerBase):
                         'power-mean=0.5 power-stddev=0.0 {4}'.format(
                             self.name, nonlinearity, output_dim,
                             max_change, learning_rate_option))
+
+            elif nonlinearity == 'dropout':
+                if not self.config['dropout-per-dim']:
+                    line = ('component name={0}.{1} type=DropoutComponent '
+                            'dim={2} dropout-proportion={3}'.format(
+                                self.name, nonlinearity, output_dim,
+                                self.config['dropout-proportion']))
+                else:
+                    line = ('component name={0}.dropout_mask type=DropoutMaskComponent '
+                            'output-dim={1} dropout-proportion={2}'.format(
+                                self.name, output_dim, self.config['dropout-proportion']))
+                    configs.append(line)
+                    # note: the input to the dropout_mask component is never used, it's
+                    # just syntactically required.
+                    line = ('component-node name={0}.dropout_mask component={0}.dropout_mask '
+                            'input={1}'.format(self.name, cur_node))
+                    configs.append(line)
+                    line = ('component name={0}.dropout type=ElementwiseProductComponent '
+                            'input-dim={1} output-dim={2} '.format(
+                                self.name, 2 * output_dim, output_dim))
+                    configs.append(line)
+                    line = ('component-node name={0}.dropout component={0}.dropout '
+                            'input=Append({1}, ReplaceIndex({0}.dropout_mask, t, 0))'
+                            ''.format(self.name, cur_node))
+                    configs.append(line)
+                    cur_node = '{0}.dropout'.format(self.name)
+                    continue
 
             else:
                 raise RuntimeError("Unknown nonlinearity type: {0}"
