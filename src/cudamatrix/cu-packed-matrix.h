@@ -78,6 +78,7 @@ class CuPackedMatrix {
   void SetRandn(); /// < Set to random values of a normal distribution
   void SetDiag(Real alpha); /// < Set the diagonal value to alpha  
   void AddToDiag(Real r); ///< Add this quantity to the diagonal of the matrix.
+  
 
   void Scale(Real alpha); 
   void ScaleDiag(Real alpha);
@@ -98,6 +99,9 @@ class CuPackedMatrix {
   void CopyFromPacked(const CuPackedMatrix<Real> &src);
   void CopyFromPacked(const PackedMatrix<Real> &src);
   void CopyToPacked(PackedMatrix<Real> *dst) const;
+
+  // For Xvector
+  void CopyFromVec(const CuVectorBase<Real> &vec);
 
   void Read(std::istream &in, bool binary);
   

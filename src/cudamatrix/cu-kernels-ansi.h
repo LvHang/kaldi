@@ -736,6 +736,16 @@ void cudaF_vec_soft_max(int Gr, int Bl, float* v, int dim);
 void cudaD_vec_sum(int Gr, int Bl, double* v, double* value, int dim, int inc);
 void cudaF_vec_sum(int Gr, int Bl, float* v, float* value, int dim, int inc);
 
+/// For Xvector
+void cudaD_compute_xvector_objf(dim3 Gr, dim3 Bl, const double *scores,
+                               MatrixDim scores_dim, double *obfj_terms,
+                               MatrixDim objf_dim, double *objf_derivs,
+                               MatrixDim derivs_dim);
+void cudaF_compute_xvector_objf(dim3 Gr, dim3 Bl, const float *scores,
+                               MatrixDim scores_dim, float *obfj_terms,
+                               MatrixDim objf_dim, float *objf_derivs,
+                               MatrixDim derivs_dim);
+
 } // extern "C"
 
 #endif // HAVE_CUDA

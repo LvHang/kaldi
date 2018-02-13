@@ -1463,6 +1463,23 @@ inline void cuda_vec_sum(int Gr, int Bl, float* v, float* value, int dim,
   cudaF_vec_sum(Gr, Bl, v, value, dim, inc);
 }
 
+/// For Xvector
+inline void cuda_compute_xvector_objf(dim3 Gr, dim3 Bl, const float *scores,
+                               MatrixDim scores_dim, float *obfj_terms,
+                               MatrixDim objf_dim, float *objf_derivs,
+                               MatrixDim derivs_dim) {
+  cudaF_compute_xvector_objf(Gr, Bl, scores, scores_dim, obfj_terms, objf_dim,
+                          objf_derivs, derivs_dim);
+}
+inline void cuda_compute_xvector_objf(dim3 Gr, dim3 Bl, const double *scores,
+                               MatrixDim scores_dim, double *obfj_terms,
+                               MatrixDim objf_dim, double *objf_derivs,
+                               MatrixDim derivs_dim) {
+  cudaD_compute_xvector_objf(Gr, Bl, scores, scores_dim, obfj_terms, objf_dim,
+                          objf_derivs, derivs_dim);
+}
+
+
 } // namespace kaldi
 
 #endif // HAVE_CUDA
