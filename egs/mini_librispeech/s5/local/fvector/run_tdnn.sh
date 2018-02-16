@@ -3,19 +3,29 @@
 # 1e is as 1d but instead of the --proportional-shrink option, using
 #  the newly added xconfig-layer-specific 'l2-regularize' options.
 
-# local/chain/compare_wer.sh exp/chain/tdnn1d_sp exp/chain/tdnn1e_sp
-# System                tdnn1d_sp tdnn1e_sp
-#WER dev_clean_2 (tgsmall)      14.21     13.43
-#WER dev_clean_2 (tglarge)      10.41      9.76
-# Final train prob        -0.0473   -0.0510
-# Final valid prob        -0.0893   -0.0889
-# Final train prob (xent)   -1.0757   -1.4148
-# Final valid prob (xent)   -1.4222   -1.6640
+# 1f is as 1e but a smaller model with various tuning changes, the most
+#  important of which is the 'bottleneck-dim' option for the last layer;
+#  also dimensions are reduced and we've removed the 'target-rms=0.5' options
+#  on the prefinal layers.
+#
+# local/chain/compare_wer.sh --online exp/chain/tdnn1{e,f}_sp 2>/dev/null
+# local/chain/compare_wer.sh --online exp/chain/tdnn1e_sp exp/chain/tdnn1f_sp
+# System                tdnn1e_sp tdnn1f_sp
+#WER dev_clean_2 (tgsmall)      14.11     13.91
+#             [online:]         14.07     13.96
+#WER dev_clean_2 (tglarge)      10.15      9.95
+#             [online:]         10.16     10.13
+# Final train prob        -0.0503   -0.0508
+# Final valid prob        -0.0887   -0.0917
+# Final train prob (xent)   -1.4257   -1.3509
+# Final valid prob (xent)   -1.6799   -1.5883
+# Num-params                 7508490   4205322
 
 
-# steps/info/chain_dir_info.pl exp/chain/tdnn1{d,e}_sp
-# exp/chain/tdnn1d_sp: num-iters=17 nj=2..5 num-params=7.5M dim=40+100->2309 combine=-0.063->-0.052 xent:train/valid[10,16,final]=(-1.65,-1.23,-1.08/-1.91,-1.55,-1.42) logprob:train/valid[10,16,final]=(-0.084,-0.057,-0.047/-0.125,-0.100,-0.089)
-# exp/chain/tdnn1e_sp: num-iters=17 nj=2..5 num-params=7.5M dim=40+100->2309 combine=-0.061->-0.056 xent:train/valid[10,16,final]=(-1.69,-1.41,-1.41/-1.91,-1.67,-1.66) logprob:train/valid[10,16,final]=(-0.065,-0.055,-0.051/-0.104,-0.095,-0.089)
+# steps/info/chain_dir_info.pl exp/chain/tdnn1{e,f}_sp
+# exp/chain/tdnn1e_sp: num-iters=17 nj=2..5 num-params=7.5M dim=40+100->2309 combine=-0.057->-0.057 (over 1) xent:train/valid[10,16,final]=(-1.73,-1.46,-1.43/-1.94,-1.72,-1.68) logprob:train/valid[10,16,final]=(-0.067,-0.055,-0.050/-0.105,-0.095,-0.089)
+# exp/chain/tdnn1f_sp: num-iters=17 nj=2..5 num-params=4.2M dim=40+100->2309 combine=-0.060->-0.060 (over 2) xent:train/valid[10,16,final]=(-1.60,-1.39,-1.35/-1.81,-1.64,-1.59) logprob:train/valid[10,16,final]=(-0.068,-0.056,-0.051/-0.104,-0.097,-0.092)
+
 
 # Set -e here so that we catch if any executable fails immediately
 set -euo pipefail
