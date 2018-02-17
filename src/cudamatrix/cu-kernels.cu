@@ -3558,6 +3558,104 @@ static void _diff_lstm_nonlinearity(const int cell_dim, const int have_dropout_m
   }
 }
 
+
+__global__
+static void _cuda_compress_uint8_sign(const BaseFloat *src, MatrixDim dim,
+                                      unsigned char *dest, int dest_stride) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int j = blockIdx.y * blockDim.y + threadIdx.y;
+  int dest_index = i + j * dest_stride,
+      src_index = i + j * dim.stride;
+  if (i < dim.cols && j < dim.rows) {
+    BaseFloat f = src[src_index];
+    dest[dest_index] = (f > 0.0 ? (unsigned char)1 : (unsigned char)0);
+  }
+}
+
+
+// The following inline templated functions are a workaround for the
+// fact that (I believe) std::numeric_limits is not available in CUDA;
+// they allow us to access the minimum and maximum elements of certain
+// types from templated code.
+template <typename I> __device__ static inline int minimum_integer_value();
+template <typename I> __device__ static inline int maximum_integer_value();
+
+template<> __device__ int maximum_integer_value<int8_t>() { return 127; }
+template<> __device__ int minimum_integer_value<int8_t>() { return -128; }
+template<> __device__ int maximum_integer_value<uint8_t>() { return 255; }
+template<> __device__ int minimum_integer_value<uint8_t>() { return 0; }
+template<> __device__ int maximum_integer_value<int16_t>() { return 32767; }
+template<> __device__ int minimum_integer_value<int16_t>() { return -32768; }
+template<> __device__ int maximum_integer_value<uint16_t>() { return 65535; }
+template<> __device__ int minimum_integer_value<uint16_t>() { return 0; }
+
+
+
+template <typename I>
+__global__
+static void _cuda_compress_bounds_check(const BaseFloat *src, MatrixDim dim,
+                                        I *dest, int dest_stride, float inv_scale) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int j = blockIdx.y * blockDim.y + threadIdx.y;
+  int dest_index = i + j * dest_stride,
+      src_index = i + j * dim.stride;
+  const int min_value = minimum_integer_value<I>(),
+      max_value = maximum_integer_value<I>();
+  int compressed_value;
+  int ok = (i < dim.cols && j < dim.rows);
+  if  (ok) {
+    float f = src[src_index];
+    // note: I'm not sure what __float2int_rn does if input is outside of
+    // integer range, but it doesn't matter much as in the situations where this
+    // type of compression would make sense, the input should be well inside the
+    // range of 'int', and if it fails, we've probably already catastrophically
+    // diverged.
+    int i = __float2int_rn(f * inv_scale);
+    if (i < min_value) compressed_value = min_value;
+    else if (i > max_value) compressed_value = max_value;
+    else compressed_value = i;
+  }
+  __syncthreads();
+  if (ok) {
+    dest[dest_index] = compressed_value;
+  }
+}
+
+
+template <typename I>
+__global__
+static void _cuda_compress_no_bounds_check(const BaseFloat *src, MatrixDim dim,
+                                           I *dest, int dest_stride,
+                                           float inv_scale) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int j = blockIdx.y * blockDim.y + threadIdx.y;
+  int dest_index = i + j * dest_stride,
+      src_index = i + j * dim.stride;
+  if (i < dim.cols && j < dim.rows) {
+    float f = src[src_index];
+    int i = __float2int_rn(f * inv_scale);
+    I s = i;
+    dest[dest_index] = s;
+  }
+}
+
+template <typename I>
+__global__
+static void _cuda_uncompress(BaseFloat *dest, MatrixDim dim,
+                             const I *src, int src_stride,
+                             float scale) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int j = blockIdx.y * blockDim.y + threadIdx.y;
+  int src_index = i + j * src_stride,
+      dest_index = i + j * dim.stride;
+  if (i < dim.cols && j < dim.rows) {
+    I s = src[src_index];
+    dest[dest_index] = float(s * scale);
+  }
+}
+
+
+
 /***********************************************************************
  * ANSI-C wrappers of CUDA kernels
  */
