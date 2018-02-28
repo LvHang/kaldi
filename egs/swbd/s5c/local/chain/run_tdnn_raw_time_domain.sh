@@ -39,8 +39,8 @@ num_jobs_final=16
 minibatch_size=128
 frames_per_eg=150
 remove_egs=false
-#common_egs_dir=exp/chain/cnn_tdnn_7k_raw_nin_new_train_setup_sp/egs
-common_egs_dir=exp/chain/tdnn_7k_raw_attention_sp/egs
+#common_egs_dir=exp/chain/tdnn_7k_raw_time_domain/egs
+#common_egs_dir=exp/chain/tdnn_7k_raw_attention_sp/egs
 #common_egs_dir=exp/chain/cnn_tdnn_lstm_raw_longer_v2_new_cnn_conf_ld5_sp/egs
 xent_regularize=0.1
 test_online_decoding=false  # if true, it will run the last decoding stage.
@@ -107,7 +107,7 @@ if [ $stage -le 10 ]; then
   steps/nnet3/chain/gen_topo.py $nonsilphonelist $silphonelist >$lang/topo
 fi
 
-if [ $stage -le 11 ]; then
+if [ $stage -le 10 ]; then
   # Build a tree using our new topology. This is the critically different
   # step compared with other recipes.
   steps/nnet3/chain/build_tree.sh --frame-subsampling-factor 3 \
@@ -125,7 +125,6 @@ if [ $stage -le 11 ]; then
       data/${data_set}_hires_raw
   done
 fi
-
 
 if [ $stage -le 12 ]; then
   echo "$0: creating neural net configs using the xconfig parser";
@@ -194,7 +193,6 @@ if [ $stage -le 13 ]; then
     --trainer.optimization.proportional-shrink=$proportional_shrink \
     --chain.apply-deriv-weights false \
     --chain.lm-opts="--num-extra-lm-states=2000" \
-    --egs.dir "$common_egs_dir" \
     --egs.stage $get_egs_stage \
     --egs.opts "--frames-overlap-per-eg 0" \
     --egs.chunk-width $frames_per_eg \

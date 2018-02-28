@@ -9,7 +9,7 @@ lm_url=www.openslr.org/resources/11
 . ./cmd.sh
 . ./path.sh
 
-stage=2
+stage=4
 . utils/parse_options.sh
 
 set -euo pipefail
@@ -75,7 +75,18 @@ fi
 
 if [ $stage -le 2 ]; then
 #generate fvector egs and train model.
-local/fvector/run_fvector.sh --train-stage $stage --data data/train_clean_5 --noise-data data/noise \
+local/fvector/run_fvector.sh --data data/train_clean_5 --noise-data data/noise \
   --egs-dir exp/fvector/egs --fvector-dir exp/fvector
 fi
 
+if [ $stage -le 3 ]; then
+  for part in dev_clean_2_hires train_clean_5_sp_hires; do
+    steps/nnet3/fvector/make_fvector_feature.sh --cmd "$train_cmd" --nj 10 \
+      data/${part} exp/fvector exp/make_fvector/train fvector_feature
+  done
+  exit 0
+fi
+
+if [ $stage -le 4 ]; then
+  local/fvector/run_tdnn.sh
+fi

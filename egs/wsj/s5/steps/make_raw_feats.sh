@@ -126,4 +126,4 @@ for n in $(seq $nj); do
 done > $data/feats.scp
 
 rm $logdir/raw_wav_feat_${name}.*.scp  $logdir/segments.* 2>/dev/null
-
+echo "Successed generate $data"
