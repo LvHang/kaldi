@@ -37,6 +37,31 @@ void ComputeChainObjfAndDeriv(const ChainTrainingOptions &opts,
   BaseFloat num_logprob_weighted;
   if (nnet_output_deriv)
     nnet_output_deriv->SetZero();
+
+  { // Doing the denominator first helps to reduce the maximum
+    // memory use, as we can set 'xent_deriv' to nonempty after
+    // we've freed the memory in this object.
+    DenominatorComputation denominator(opts, den_graph,
+                                       supervision.num_sequences,
+                                       nnet_output);
+
+    den_logprob_weighted = supervision.weight * denominator.Forward();
+    if (nnet_output_deriv)
+      ok = denominator.Backward(-supervision.weight,
+                                nnet_output_deriv);
+  }
+
+  if (xent_output_deriv != NULL) {
+    // the reason for kStrideEqualNumCols is so that we can share the memory
+    // block with the memory that was used for exp_nnet_output_transposed_ from
+    // chain-denominator.cc, which has just been freed; it also uses the
+    // kStrideEqualNumCols arg (its shape is the transpose of this matrix's
+    // shape).
+    xent_output_deriv->Resize(nnet_output.NumRows(), nnet_output.NumCols(),
+                              kSetZero, kStrideEqualNumCols);
+  }
+
+
   {
     NumeratorComputation numerator(supervision, nnet_output);
     // note: supervision.weight is included as a factor in the derivative from
