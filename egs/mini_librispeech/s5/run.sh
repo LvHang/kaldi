@@ -9,7 +9,7 @@ lm_url=www.openslr.org/resources/11
 . ./cmd.sh
 . ./path.sh
 
-stage=0
+stage=7
 . utils/parse_options.sh
 
 set -euo pipefail
@@ -61,7 +61,6 @@ if [ $stage -le 2 ]; then
   # to have accurate alignments.
   utils/subset_data_dir.sh --shortest data/train_clean_5 500 data/train_500short
 fi
-
 # train a monophone system
 if [ $stage -le 3 ]; then
   # TODO(galv): Is this too many jobs for a smaller dataset?
@@ -170,6 +169,7 @@ if [ $stage -le 7 ]; then
 
   utils/build_const_arpa_lm.sh \
     data/local/lm/lm_tglarge.arpa.gz data/lang data/lang_test_tglarge
+  exit 0
 
   steps/align_fmllr.sh --nj 5 --cmd "$train_cmd" \
     data/train_clean_5 data/lang exp/tri3b exp/tri3b_ali_train_clean_5

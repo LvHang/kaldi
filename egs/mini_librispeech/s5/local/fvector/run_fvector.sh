@@ -3,7 +3,7 @@
 . ./cmd.sh
 set -e
 
-stage=5
+stage=0
 train_stage=-10
 data=data/train_clean_5
 noise_data=data/noise
@@ -52,9 +52,9 @@ if [ $stage -le 4 ]; then
 EOF
   steps/nnet3/xconfig_to_configs.py --xconfig-file $fvector_dir/configs/network.xconfig --config-dir $fvector_dir/configs/
   # Modify the final.config and generate sin.mat/cos.mat manually
+  python local/fvector/add_output_node.py --input-dim 400 --output-dim 300 --config-file $fvector_dir/configs/final.config
   python local/fvector/generate_sin_cos_matrix.py \
     --feat-dim 400 --dir $fvector_dir
-  exit 0
 fi
 
 if [ $stage -le 5 ]; then

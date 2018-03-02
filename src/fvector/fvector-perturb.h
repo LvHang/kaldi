@@ -41,39 +41,37 @@ struct FvectorPerturbOptions {
 
   void Register(OptionsItf *opts) {
     opts->Register("sample-frequency", &sample_frequency, "The sample frequency "
-                   "of the wav signal. (float, default = 16000)");
+                   "of the wav signal.");
     opts->Register("expected-chunk-length", &expected_chunk_length, "It show the "
                    "length of chunk you expected. e.g. 100ms. That means the length "
                    "of output will correspond to 100ms. At the same time, it will "
                    "affect the speed_perturb_rate, the speed_perturb_rate factor will "
                    "in the range of min{expected-chunk-length/original-length, "
-                   "max-speed-perturb-rate}. (float, default = 100 ms)");
+                   "max-speed-perturb-rate}.");
     opts->Register("max-speed-perturb-rate", &max_speed_perturb_rate,
                    "Max speed perturbation applied on matrix. It will work together "
                    "with expected_chunk_length. E.g. 0.1 means we will generate "
                    "speed_factor randomly from range (1-a, 1+a), where a="
-                   "min{original_length/expected_length-1, 0.1}. (float, default = 0.1)");
+                   "min{original_length/expected_length-1, 0.1}.");
     opts->Register("max-volume-variance", &max_volume_variance, "The variation in "
                    "volume will vary form 1-max-volume-variance to 1+max-volume-variance "
-                   "randomly. (float, default = 0.03)");
+                   "randomly.");
     opts->Register("max-snr",&max_snr,"Specify a upperbound Signal to Noise Ratio. We will scale the noise according "
-                   "to the original signal and SNR. Normally, it's a non-zero number between -30 and 30."
-                   "(float, default = -5)");
+                   "to the original signal and SNR. Normally, it's a non-zero number between -30 and 30.");
     opts->Register("min-snr",&min_snr,"Specify a lowerbound Signal to Noise Ratio. We will scale the noise according "
-                   "to the original signal and SNR. Normally, it's a non-zero number between -30 and 30."
-                   "(float, default = 10)");
+                   "to the original signal and SNR. Normally, it's a non-zero number between -30 and 30.");
     opts->Register("volume-perturbation", &volume_perturbation, "If true, we will "
-                   "conduct variations in volume. (bool, default = true)");
+                   "conduct variations in volume.");
     opts->Register("speed-perturbation", &speed_perturbation, "If true, we will "
-                   "conduct variations in speed. (bool, default = true)");
+                   "conduct variations in speed.");
     opts->Register("time-shift", &time_shift, "If true, we will "
                    "conduct time shift. That means randomly select the start point from "
                    "range [0, input.NumCols() - expected_chunk_length], and then "
                    "get the successive 'expected_chunk_length' data. Otherwise, we get "
-                   "the data from the head. (bool, default = true)");
+                   "the data from the head.");
     opts->Register("add-noise", &add_noise, "Add additive noise to source chunk with "
                    "probability. E.g. 0.85 means we add noise with 85 percent probability, "
-                   "and remain with 15 percent probability. (float, default = 0.85)");
+                   "and remain with 15 percent probability.");
   }
 };
 

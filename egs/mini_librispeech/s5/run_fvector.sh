@@ -9,56 +9,15 @@ lm_url=www.openslr.org/resources/11
 . ./cmd.sh
 . ./path.sh
 
-stage=4
+stage=2
 . utils/parse_options.sh
 
 set -euo pipefail
 
 mkdir -p $data
-
-for part in dev-clean-2 train-clean-5; do
-  local/download_and_untar.sh $data $data_url $part
-done
-
+#Stage1: run run.sh from scratch to generate a chain model.
 if [ $stage -le 0 ]; then
-  local/download_lm.sh $lm_url data/local/lm
-fi
-
-#prepare the data. Generate dirs: lang, dev_clean_2, train_clean_5, train_500short 
-if [ $stage -le 0 ]; then
-  # format the data as Kaldi data directories
-  for part in dev-clean-2 train-clean-5; do
-    # use underscore-separated names in data directories.
-    local/data_prep.sh $data/LibriSpeech/$part data/$(echo $part | sed s/-/_/g)
-  done
-
-  local/prepare_dict.sh --stage 3 --nj 30 --cmd "$train_cmd" \
-    data/local/lm data/local/lm data/local/dict_nosp
-
-  utils/prepare_lang.sh data/local/dict_nosp \
-    "<UNK>" data/local/lang_tmp_nosp data/lang_nosp
-
-  local/format_lms.sh --src-dir data/lang_nosp data/local/lm
-  # Create ConstArpaLm format language model for full 3-gram and 4-gram LMs
-  utils/build_const_arpa_lm.sh data/local/lm/lm_tglarge.arpa.gz \
-    data/lang_nosp data/lang_nosp_test_tglarge
-  
-  mfccdir=mfcc
-  # spread the mfccs over various machines, as this data-set is quite large.
-  if [[  $(hostname -f) ==  *.clsp.jhu.edu ]]; then
-    mfcc=$(basename mfccdir) # in case was absolute pathname (unlikely), get basename.
-    utils/create_split_dir.pl /export/b{07,14,16,17}/$USER/kaldi-data/egs/librispeech/s5/$mfcc/storage \
-      $mfccdir/storage
-  fi
-
-  for part in dev_clean_2 train_clean_5; do
-    steps/make_mfcc.sh --cmd "$train_cmd" --nj 10 data/$part exp/make_mfcc/$part $mfccdir
-    steps/compute_cmvn_stats.sh data/$part exp/make_mfcc/$part $mfccdir
-  done
-
-  # Get the shortest 500 utterances first because those are more likely
-  # to have accurate alignments.
-  utils/subset_data_dir.sh --shortest data/train_clean_5 500 data/train_500short
+  run.sh
 fi
 
 #Stage2: prepare a noise dir(maybe a speicial noise dataset). In mini_librispeech,
@@ -81,10 +40,23 @@ fi
 
 if [ $stage -le 3 ]; then
   for part in dev_clean_2_hires train_clean_5_sp_hires; do
+    if [ -e data/${part}_mfcc ]; then
+      if [ -e data/${part} ]; then
+        rm -rf data/${part}
+      fi
+      mv data/${part}_mfcc data/${part}
+    fi
+    
+    mv data/${part} data/${part}_mfcc
+    cp -r data/${part}_mfcc data/${part}
+    for f in $(ls data/${part}); do
+      if [ $f != "spk2gender" -a $f != "spk2utt" -a $f != "text" -a $f != "utt2spk" -a $f != "wav.scp" ]; then
+        rm -rf data/$part/$f
+      fi
+    done
     steps/nnet3/fvector/make_fvector_feature.sh --cmd "$train_cmd" --nj 10 \
       data/${part} exp/fvector exp/make_fvector/train fvector_feature
   done
-  exit 0
 fi
 
 if [ $stage -le 4 ]; then

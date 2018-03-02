@@ -67,15 +67,17 @@ mkdir -p $egs_dir
 mkdir -p $egs_dir/log
 mkdir -p $egs_dir/info
 num_utts=$(cat $data_dir/wav.scp | wc -l)
-num_valid=$num_utts * num_diagnostic_percent / 100;
+num_valid=$[$num_utts*$num_diagnostic_percent/100];
 
 #Assume recording-id == utt-id
 if [ $stage -le 1 ]; then
   #Get list of validation utterances.
   awk '{print $1}' $data_dir/wav.scp | utils/shuffle_list.pl | head -$num_valid \
-   > ${egs_dir}/info/valid_uttlist
-  awk '{print $1}' $data_dir/wav.scp | utils/filter_scp.pl --exclude $egs_dir/info/valid_uttlist | \
-   > ${egs_dir}/info/train_uttlist
+    > ${egs_dir}/info/valid_uttlist
+  cat $data_dir/wav.scp | utils/filter_scp.pl --exclude $egs_dir/info/valid_uttlist | \
+    awk '{print $1}' > ${egs_dir}/info/train_uttlist
+  cat ${egs_dir}/info/train_uttlist | utils/shuffle_list.pl | head -$num_valid \
+    > ${egs_dir}/info/train_diagnostic_uttlist
 fi
 # get the (120ms) chunks from wav.scp and noise.scp. And compose 1 source
 # chunk and 2 noise chunks into a matrix.
@@ -95,6 +97,12 @@ if [ $stage -le 2 ]; then
       scp:$noise_dir/wav.scp $noise_dir/utt2dur_fix \
       ark,scp:$egs_dir/orign_valid_chunks.ark,$egs_dir/orign_valid_chunks.scp
   cp $egs_dir/orign_valid_chunks.scp $data_dir/orign_valid_chunks.scp
+
+  $cmd $egs_dir/log/cut_train_diagnostic_wav_into_chunks.log \
+    fvector-chunk --chunk-size=120 "scp:utils/filter_scp.pl $egs_dir/info/train_diagnostic_uttlist $data_dir/wav.scp |" \
+      scp:$noise_dir/wav.scp $noise_dir/utt2dur_fix \
+      ark,scp:$egs_dir/orign_train_diagnostic_chunks.ark,$egs_dir/orign_train_diagnostic_chunks.scp
+  cp $egs_dir/orign_train_diagnostic_chunks.scp $data_dir/orign_train_diagnostic_chunks.scp
 fi
 
 echo "$0: Generate the egs for train dataset."
@@ -141,7 +149,7 @@ if [ $stage -le 3 ]; then
   echo "$0: Do data perturbation and dump on disk"
   #The options could be added in this line
   $cmd JOB=1:$nj $egs_dir/log/do_train_perturbation_and_get_egs.JOB.log \
-    fvector-add-noise scp:$egs_dir/orign_train_chunks.JOB.scp ark:- \| \
+    fvector-add-noise --max-snr=10 --min-snr=20 scp:$egs_dir/orign_train_chunks.JOB.scp ark:- \| \
     fvector-get-egs ark:- ark:- \| \
     nnet3-copy-egs --random=true --srand=\$[JOB+$srand] ark:- $egs_list || exit 1;
 fi
@@ -216,9 +224,8 @@ fi
 
 echo "$0: Generate the egs for valid dataset"
 if [ $stage -le 5 ]; then
-  valid_fvector_add_noise="scp:fvector-add-noise scp:$egs_dir/orign_valid_chunks.scp ark:- |"
   $cmd $egs_dir/log/do_valid_perturbation_and_get_egs.log \
-    fvector-add-noise scp:$egs_dir/orign_valid_chunks.scp ark:- \| \
+    fvector-add-noise --max-snr=10 --min-snr=20 scp:$egs_dir/orign_valid_chunks.scp ark:- \| \
     fvector-get-egs ark:- ark:- \| \
     nnet3-copy-egs --random=true --srand=$srand ark:- ark:$egs_dir/valid.egs || exit 1;
   #get the valid.egs
@@ -227,7 +234,12 @@ fi
 
 echo "$0: Generate the egs for train diagnostic"
 if [ $stage -le 6 ];then
-  cp $egs_dir/valid.egs $egs_dir/train_diagnostic_egs.1.ark
+  $cmd $egs_dir/log/do_train_diagnostic_perturbation_and_get_egs.log \
+    fvector-add-noise --max-snr=10 --min-snr=20 scp:$egs_dir/orign_train_diagnostic_chunks.scp ark:- \| \
+    fvector-get-egs ark:- ark:- \| \
+    nnet3-copy-egs --random=true --srand=$srand ark:- ark:$egs_dir/train_diagnostic.egs || exit 1;
+  #get the train_diagnostic.egs
+  cp $egs_dir/train_diagnostic.egs $egs_dir/train_diagnostic_egs.1.ark
   echo "1" > $egs_dir/info/num_diagnostic_archives
 fi
 
