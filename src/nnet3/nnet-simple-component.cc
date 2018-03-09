@@ -2928,7 +2928,17 @@ void NaturalGradientAffineComponent::Read(std::istream &is, bool binary) {
   ExpectToken(is, binary, "<NumSamplesHistory>");
   ReadBasicType(is, binary, &num_samples_history_);
   ExpectToken(is, binary, "<Alpha>");
-  ReadBasicType(is, binary, &alpha_);
+  ReadBasicType(is, binary, &alpha);
+
+  preconditioner_in_.SetNumSamplesHistory(num_samples_history);
+  preconditioner_out_.SetNumSamplesHistory(num_samples_history);
+  preconditioner_in_.SetAlpha(alpha);
+  preconditioner_out_.SetAlpha(alpha);
+  preconditioner_in_.SetRank(rank_in);
+  preconditioner_out_.SetRank(rank_out);
+  preconditioner_in_.SetUpdatePeriod(update_period);
+  preconditioner_out_.SetUpdatePeriod(update_period);
+
   if (PeekToken(is, binary) == 'M') {
     // MaxChangePerSample, long ago removed; back compatibility.
     ExpectToken(is, binary, "<MaxChangePerSample>");
