@@ -38,6 +38,8 @@ int main(int argc, char *argv[]) {
     BaseFloat frame_length_ms = 25; // in milliseconds
     BaseFloat frame_shift_ms = 10; // in milliseconds
     BaseFloat samp_freq=16000;
+    int left_padding=0;
+    int right_padding=0;
 
     ParseOptions po(usage);
     po.Register("compress", &compress, "If true, write egs in "
@@ -46,6 +48,11 @@ int main(int argc, char *argv[]) {
     po.Register("frame-shift", &frame_shift_ms, "Frame shift in milliseconds");
     po.Register("sample-frequency", &samp_freq, "Waveform data sample frequency ("
                 "must match the waveform file, if specified there)");
+    po.Register("left-padding", &left_padding, "When we use convolutional NN,"
+                "we tend to pad on the time axis with repeats of the first frame.");
+    po.Register("right-padding", &right_padding, "When we use convolutional NN,"
+                "we tend to pad on the time axis with repeats of the last frame.");
+
 
     po.Read(argc, argv);
 
@@ -82,9 +89,30 @@ int main(int argc, char *argv[]) {
         chunk1_matrix.Row(i).CopyFromVec(chunk1.Range(i*frame_shift_ms*samp_freq/1000, num_cols));
         chunk2_matrix.Row(i).CopyFromVec(chunk2.Range(i*frame_shift_ms*samp_freq/1000, num_cols));
       }
+      Matrix<BaseFloat> chunk1_matrix_out(chunk1_matrix),
+                        chunk2_matrix_out(chunk2_matrix);
+      if((left_padding !=0) || (right_padding != 0)) {
+        int32 tot_num_rows = num_rows+left_padding+right_padding;
+        chunk1_matrix_out.Resize(tot_num_rows, num_cols, kUndefined);
+        chunk2_matrix_out.Resize(tot_num_rows, num_cols, kUndefined);
+        for(int32 row = 0; row < tot_num_rows; row++) {
+          int32 row_in = row - left_padding;
+          if (row_in < 0) {
+            row_in = 0;
+          } else if (row_in >= num_rows ) {
+            row_in = num_rows -1;
+          }
+          SubVector<BaseFloat> vec_chunk1_in(chunk1_matrix, row_in),
+                               vec_chunk1_out(chunk1_matrix_out, row),
+                               vec_chunk2_in(chunk2_matrix, row_in),
+                               vec_chunk2_out(chunk2_matrix_out, row);
+          vec_chunk1_out.CopyFromVec(vec_chunk1_in);
+          vec_chunk2_out.CopyFromVec(vec_chunk2_in);
+        }
+      }
       //generate the NnetIo
-      NnetIo nnet_io1 = NnetIo("input", 0, chunk1_matrix),
-             nnet_io2 = NnetIo("input", 0, chunk2_matrix);
+      NnetIo nnet_io1 = NnetIo("input", -left_padding, chunk1_matrix_out),
+             nnet_io2 = NnetIo("input", -left_padding, chunk2_matrix_out);
       //modify the n index, so that in a mini-batch Nnet3Example, the adjacent
       //two NnetIos come from the same source signal.
       for (std::vector<Index>::iterator indx_it = nnet_io1.indexes.begin();

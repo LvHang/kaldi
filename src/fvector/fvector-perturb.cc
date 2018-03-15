@@ -19,14 +19,14 @@ void FvectorPerturb::ApplyPerturbation(const MatrixBase<BaseFloat>& input_chunk,
   }
   // The expected_dim_matrix is a matrix (input_chunk.NumRows(), expected-chunk-length
   // * sample_frequency / 1000). E.g. it is a (4, 800) matrix.
-  Matrix<BaseFloat> expected_dim_matrix(input_chunk.NumRows(),
+  Matrix<BaseFloat> expected_dim_matrix(original_dim_matrix.NumRows(),
       opts_.expected_chunk_length * opts_.sample_frequency / 1000);
   if (opts_.speed_perturbation) {
     //1. generate speed perturb factor randomly(Noice: the expected_length is
     //always smaller than original_length) for each line.
     //(1) a=min{original_length/expected_length -1, max-speed-perturb-rate}
     //(2) the range of factor is (1-a, 1+a)
-    BaseFloat boundary = std::min(static_cast<BaseFloat>((input_chunk.NumCols() * 1.0 / opts_.sample_frequency)
+    BaseFloat boundary = std::min(static_cast<BaseFloat>((original_dim_matrix.NumCols() * 1.0 / opts_.sample_frequency)
           * 1000 / opts_.expected_chunk_length - 1), opts_.max_speed_perturb_rate);
     for (MatrixIndexT i = 0; i < original_dim_matrix.NumRows(); ++i) {
       //caculate the speed factor
@@ -135,15 +135,18 @@ void FvectorPerturb::AddNoise(BaseFloat probability_threshold,
   //2. add N1(line3) to S1(line1) with snr1 with probability
   //   add N2(line4) to S2(line2) with snr2 with probability
   for (MatrixIndexT i = 0; i < 2; i++) {
-    BaseFloat  probability = static_cast<BaseFloat>(RandInt(0, 10000) / 100.0);
+    BaseFloat  probability = static_cast<BaseFloat>(RandInt(0, 100) / 100.0);
     if (probability <= probability_threshold) {
       Vector<BaseFloat> source(chunk->Row(i));
       Vector<BaseFloat> noise(chunk->Row(i+2));
-      BaseFloat source_energy = VecVec(source, source);
-      BaseFloat noise_energy = VecVec(noise, noise);
-      // The smaller the value, the greater the snr
+      BaseFloat source_power = VecVec(source, source) / source.Dim();
+      BaseFloat noise_power = VecVec(noise, noise) / noise.Dim();
       int32 snr = RandInt(opts_.max_snr, opts_.min_snr);
-      BaseFloat scale_factor = sqrt(source_energy/ noise_energy / (pow(10, snr/20)));
+      BaseFloat scale_factor = sqrt(pow(10, -snr/10) * source_power / noise_power);
+      //BaseFloat source_energy = VecVec(source, source);
+      //BaseFloat noise_energy = VecVec(noise, noise);
+      // The smaller the value, the greater the snr
+      //BaseFloat scale_factor = sqrt(source_energy/ noise_energy / (pow(10, snr/20)));
       chunk->Row(i).AddVec(scale_factor, noise);
     }
   }

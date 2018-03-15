@@ -9,7 +9,7 @@ lm_url=www.openslr.org/resources/11
 . ./cmd.sh
 . ./path.sh
 
-stage=2
+stage=4
 . utils/parse_options.sh
 
 set -euo pipefail
@@ -60,5 +60,5 @@ if [ $stage -le 3 ]; then
 fi
 
 if [ $stage -le 4 ]; then
-  local/fvector/run_tdnn.sh
+  local/fvector/run_tdnn.sh --stage 14 --train-stage 9
 fi
