@@ -4367,5 +4367,449 @@ void RemoveCommandsForUnusedMatrix(const Analyzer &analyzer,
   }
 }
 
+
+
+// This comparison operator is used in the function InsertCommands()
+// to sort a list of these pairs by the .first element.
+struct CommandPairComparator {
+  // operator () should be viewed as a '<' operator that only looks at
+  // the .first element, treating the .second elements as equal.
+  bool operator () (const std::pair<int32, NnetComputation::Command> &p1,
+                    const std::pair<int32, NnetComputation::Command> &p2) const {
+    return p1.first < p2.first;
+  }
+};
+
+void InsertCommands(
+    std::vector<std::pair<int32, NnetComputation::Command> > *new_commands,
+    NnetComputation *computation) {
+  int32 num_new_commands = new_commands->size(),
+      num_old_commands = computation->commands.size();
+  if (num_new_commands == 0)
+    return;
+  CommandPairComparator comparison_operator;
+  // use std::stable_sort so that for entries in 'new_commands' that
+  // have the same .first value, they stay in the same order they were
+  // in before sorting.
+  std::stable_sort(new_commands->begin(), new_commands->end(),
+                   comparison_operator);
+
+  if (RandInt(0, 3) == 0) {   // check 'new_commands'
+    for (int32 i = 0; i + 1 < num_new_commands; i++) {
+      KALDI_ASSERT((*new_commands)[i].first <= (*new_commands)[i+1].first &&
+                   (*new_commands)[i].first >= 0 &&
+                   (*new_commands)[i+1].first <= num_old_commands);
+    }
+  }
+  std::vector<NnetComputation::Command> merged_commands;
+  merged_commands.reserve(num_old_commands + num_new_commands);
+
+  std::vector<std::pair<int32, NnetComputation::Command> >::const_iterator
+      new_commands_iter = new_commands->begin(),
+      new_commands_end = new_commands->end();
+
+  for (int32 old_command_index = 0; old_command_index <= num_old_commands;
+       old_command_index++) {
+    while (new_commands_iter != new_commands_end &&
+           new_commands_iter->first <= old_command_index) {
+      merged_commands.push_back(new_commands_iter->second);
+      ++new_commands_iter;
+    }
+    if (old_command_index < num_old_commands)
+      merged_commands.push_back(computation->commands[old_command_index]);
+  }
+  KALDI_ASSERT(merged_commands.size() == num_old_commands +
+               num_new_commands);
+  // copy to 'computation->commands' via shallow swap.
+  computation->commands.swap(merged_commands);
+  FixGotoLabel(computation);
+}
+
+/**
+   This class is used in the function OptimizeMemoryCompression(),
+   once we determine that there is some potential to do memory compression
+   for this computation.
+ */
+class MemoryCompressionOptimizer {
+ public:
+
+  /** @param [in] nnet         The neural net the computation is for.
+      @param [in] memory_compression_level.  The level of compression:
+         0 = no compression (the constructor should not be calle with this value).
+         1 = compression that doesn't affect the results (but still takes time).
+         2 = compression that affects the results only very slightly
+         3 = compression that affects the results a little more.
+      @param [in] middle_command  Must be the command-index of the
+          command of type kNoOperationMarker in 'computation'.
+      @param [in,out] computation  The computation we're optimizing.
+  */
+  MemoryCompressionOptimizer(const Nnet &nnet,
+                             int32 memory_compression_level,
+                             int32 middle_command,
+                             NnetComputation *computation):
+      nnet_(nnet), memory_compression_level_(memory_compression_level),
+      middle_command_(middle_command), computation_(computation) { }
+
+  void Optimize();
+ private:
+
+  // This function, called from Compress(), figures out whether we can compress
+  // matrix m, and if so, adds an entry to compress_info_.
+  void ProcessMatrix(int32 m);
+
+  // This function modifies the commands in '*computation_', taking
+  // as input the commands in compress_info_.
+  void ModifyComputation();
+
+  // While deciding what matrices to compress we will create a list of structs
+  // of type MatrixCompressInfo.  Later we copy-and-modify the commands in the
+  // computation, putting the compression commands into their appropriate place.
+  struct MatrixCompressInfo {
+    // m is the matrix-index of the matrix we're going to compress.
+    int32 m;
+    // compression_command_index is the command-index of the command
+    // *after* which we will place the compression command.  Normally
+    // this will be some type of propagation.
+    int32 compression_command_index;
+    // compression_command_index is the command-index of the command
+    // *before* which we will place the uncompression command.  Normally
+    // this will be some type of backprop.
+    int32 uncompression_command_index;
+    // 'compression_type' (e.g. kCompressedMatrixInt8) determines the type
+    // we compress the BaseFloats to.
+    CuCompressedMatrixType compression_type;
+    // 'range' determines range of values that the compressed values can
+    // be in: for signed types they are in [-range, range], for unsigned
+    // types, in [0, range].
+    // As a special case, range = 0 means that the compression just stores the
+    // sign (-1, 0 or 1) of the input, and decompresses it to -1, 0 or 1; this
+    // is useful for ReLUs.
+    BaseFloat range;
+    // this is provided to the initializer of CuCompressedMatrix; it should
+    // be true if the values being compressed are potentially outside of
+    // the representable range.
+    bool truncate;
+    MatrixCompressInfo(int32 m, int32 forward_command_index,
+                       int32 backward_command_index,
+                       CuCompressedMatrixType compression_type,
+                       BaseFloat range, bool truncate):
+        m(m), compression_command_index(forward_command_index),
+        uncompression_command_index(backward_command_index),
+        compression_type(compression_type), range(range),
+        truncate(truncate) { }
+
+  };
+  std::vector<MatrixCompressInfo> compress_info_;
+
+  const Nnet &nnet_;
+  int32 memory_compression_level_;
+  int32 middle_command_;
+  NnetComputation *computation_;
+  Analyzer analyzer_;
+};
+
+
+void MemoryCompressionOptimizer::ModifyComputation() {
+  // whole_submatrices[m] is the submatrix-index of the submatrix that
+  // represents the whole of matrix m.
+  std::vector<int32> whole_submatrices;
+  computation_->GetWholeSubmatrices(&whole_submatrices);
+
+  // 'pairs_to_insert' will be a list of pairs (command-index, command),
+  // meaning: (command-index just before which to insert this command; command
+  // to insert).
+  std::vector<std::pair<int32, NnetComputation::Command> >
+      pairs_to_insert;
+  pairs_to_insert.reserve(compress_info_.size() * 2);
+  for (size_t i = 0; i < compress_info_.size(); i++) {
+    const MatrixCompressInfo &info = compress_info_[i];
+    int32 s = whole_submatrices[info.m];
+    // below we use compression_command_index + 1 because we want the
+    // compression to go after the command in 'info.compression_command_index'
+    // (which might be, for instance, a forward propagation command).
+    std::pair<int32, NnetComputation::Command> p1(
+        info.compression_command_index + 1,
+        NnetComputation::Command(info.range, kCompressMatrix,
+                                 s, static_cast<int32>(info.compression_type),
+                                 info.truncate ? 1 : 0));
+    pairs_to_insert.push_back(p1);
+    std::pair<int32, NnetComputation::Command> p2(
+        info.uncompression_command_index,
+        NnetComputation::Command(1.0, kDecompressMatrix, s));
+    pairs_to_insert.push_back(p2);
+  }
+  InsertCommands(&pairs_to_insert,
+                 computation_);
+}
+
+
+void MemoryCompressionOptimizer::Optimize() {
+  analyzer_.Init(nnet_, *computation_);
+  // note: matrix zero is not really a matrix.
+  int32 num_matrices = computation_->matrices.size();
+  for (int32 m = 1; m < num_matrices; m++)
+    ProcessMatrix(m);
+  if (!compress_info_.empty())
+    ModifyComputation();
+}
+
+void MemoryCompressionOptimizer::ProcessMatrix(int32 m) {
+  if (analyzer_.matrix_accesses[m].is_output) {
+    return;  // We can't do this optimization for matrices that are going to be
+             // output to the user.
+  }
+
+  // 'accesses' list the commands that access this matrix.
+  const std::vector<Access> &accesses = analyzer_.matrix_accesses[m].accesses;
+  // the 'kReadAccess' below is actually a don't-care  This is just
+  // to find the position in 'accesses' that corresponds to command-index
+  // 'middle_command'.
+  Access middle_access(middle_command_, kReadAccess);
+  std::vector<Access>::const_iterator iter = std::lower_bound(accesses.begin(),
+                                                              accesses.end(),
+                                                              middle_access);
+  // At this point, 'iter' points to the first access in 'accesses'
+  // whose command index is >= 'middle_command_' (which separates the forward
+  // and backward passes), or accesses.end() if this matrix was not
+  // accessed during the backward pass.
+  if (iter == accesses.end()) {
+    return;  // There is nothing to do: this matrix was not accessed during the
+             // backward pass.
+  }
+  if (iter == accesses.begin()) {
+    return;  // There is nothing to do: this matrix was not accessed during the
+             // forward pass.
+  }
+  // 'backward_access' is the first access of the matrix in the backward
+  // pass of the computation, and
+  // 'forward_access' is the last access of the matrix in the forward pass
+  // of the computation.
+  const Access &backward_access = iter[0],
+      &forward_access = iter[-1];
+  KALDI_ASSERT(forward_access.command_index < middle_command_ &&
+               backward_access.command_index > middle_command_);
+
+  // 'backward_access_is_last_access' is going to be set to true if
+  // 'backward_access' is the last command to access the matrix (apart from
+  // deallocation or matrix-swap commands, which don't show up in the list of
+  // accesses).
+  bool backward_access_is_last_access = (accesses.end() == iter + 1);
+
+  int32 backward_command_index = backward_access.command_index,
+      forward_command_index = forward_access.command_index;
+  NnetComputation::Command
+      &backward_command = computation_->commands[backward_command_index];
+
+  if (memory_compression_level_ >= 1 &&
+      backward_access_is_last_access &&
+      backward_access.access_type == kReadAccess &&
+      backward_command.command_type == kBackprop) {
+    int32 component_index = backward_command.arg1;
+    const Component *component = nnet_.GetComponent(component_index);
+    // this is potentially a candidate for our optimization for ReLU units,
+    // where we only need to store the sign.
+    if (component->Type() == "RectifiedLinearComponent") {
+      compress_info_.push_back(
+          MatrixCompressInfo(m, forward_command_index,
+                             backward_command_index,
+                             kCompressedMatrixUint8, 0.0,
+                             true));
+      return;
+    }
+  }
+
+  // If memory_compression_level >= 2 (an "intermediate" level of compression),
+  // then we'll consider compressing quantities using 16 bits in the range
+  // [-10, 10].  Because of the way this compression works, exact zero will
+  // still be uncompressed as exact zero, so even if this is the output
+  // of a ReLU, it's OK.  (Having a few derivatives zero for ReLU outputs
+  // that were very close to zero is OK.)
+  if (memory_compression_level_ >= 2) {
+    compress_info_.push_back(
+        MatrixCompressInfo(m, forward_command_index,
+                           backward_command_index,
+                           kCompressedMatrixInt16, 10.0,
+                           true));
+    return;
+  }
+
+  // TODO: later maybe implement something for memory compression level = 3.
+}
+
+
+
+
+void OptimizeMemoryCompression(const Nnet &nnet,
+                               int32 memory_compression_level,
+                               NnetComputation *computation) {
+  if (memory_compression_level == 0 || computation->commands.empty())
+    return;
+  // don't apply this optimization to looped computations.
+  if (computation->commands.back().command_type == kGotoLabel)
+    return;
+
+  // 'middle_command' will be the index of the command of type
+  // 'kNoOperationMarker' that separates the forward and backward
+  // passes.  If it doesn't exist, it means this computation doesn't
+  // include
+  int32 middle_command = -1;
+  for (size_t i = 0; i < computation->commands.size(); i++) {
+    if (computation->commands[i].command_type == kNoOperationMarker) {
+      if (middle_command < 0) {
+        middle_command = static_cast<int32>(i);
+      } else {
+        KALDI_WARN << "Found more than one command of type kNoOperationMarker "
+            "in non-looped computation.";
+        // there are more than one command of this type... this wasn't expected.
+        // return (i.e. do nothing).
+        return;
+      }
+    }
+  }
+  if (middle_command == -1) {
+    return;  // This computation doesn't have a backprop pass.
+  }
+  if (memory_compression_level >= 1) {
+    int64 bytes_used_initial, bytes_used_final;
+    if (GetVerboseLevel() >= 2)
+      bytes_used_initial = GetMaxMemoryUse(*computation);
+
+    MemoryCompressionOptimizer opt(nnet, memory_compression_level,
+                                   middle_command, computation);
+    opt.Optimize();
+
+    if (GetVerboseLevel() >= 2) {
+      bytes_used_final = GetMaxMemoryUse(*computation);
+      if (bytes_used_final != bytes_used_initial) {
+        KALDI_VLOG(2) << "Memory compression reduced  memory use from "
+                      << bytes_used_initial << " to "
+                      << bytes_used_final << " bytes.";
+      }
+    }
+  }
+}
+
+
+std::shared_ptr<const NnetComputation> ComputationCache::Find(
+    const ComputationRequest &in_request) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  CacheType::iterator iter = computation_cache_.find(&in_request);
+  if (iter == computation_cache_.end()) {
+    return NULL;
+  } else {
+    std::shared_ptr<const NnetComputation> ans = iter->second.first;
+    // Update access record by moving the accessed request to the end of the
+    // access queue, which declares that it's the most recently used.
+    access_queue_.splice(access_queue_.end(), access_queue_,
+                         iter->second.second);
+    return ans;
+  }
+}
+
+
+ComputationCache::ComputationCache(int32 cache_capacity):
+    cache_capacity_(cache_capacity) {
+  KALDI_ASSERT(cache_capacity > 0);
+}
+
+std::shared_ptr<const NnetComputation> ComputationCache::Insert(
+    const ComputationRequest &request_in,
+    const NnetComputation *computation_in) {
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (static_cast<int32>(computation_cache_.size()) >= cache_capacity_) {
+    //  Cache has reached capacity; purge the least-recently-accessed request
+    const CacheType::iterator iter =
+        computation_cache_.find(access_queue_.front());
+    KALDI_ASSERT(iter != computation_cache_.end());
+    const ComputationRequest *request = iter->first;
+    computation_cache_.erase(iter);
+    delete request;
+    // we don't need to delete the computation in iter->second.first, as the
+    // shared_ptr takes care of that automatically.
+    access_queue_.pop_front();
+  }
+
+  // Now insert the thing we need to insert.  We'll own the pointer 'request' in
+  // 'computation_cache_', so we need to allocate our own version.
+  ComputationRequest *request = new ComputationRequest(request_in);
+  // When we construct this shared_ptr, it takes ownership of the pointer
+  // 'computation_in'.
+  std::shared_ptr<const NnetComputation> computation(computation_in);
+
+  AqType::iterator ait = access_queue_.insert(access_queue_.end(), request);
+
+  std::pair<CacheType::iterator, bool> p = computation_cache_.insert(
+      std::make_pair(request, std::make_pair(computation, ait)));
+  if (!p.second) {
+    // if p.second is false, this pair was not inserted because
+    // a computation for the same computation-request already existed in
+    // the map. This is possible in multi-threaded operations, if two
+    // threads try to compile the same computation at the same time (only
+    // one of them will successfully add it).
+    // We need to erase the access-queue element that we just added, it's
+    // no longer going to be needed.
+    access_queue_.erase(ait);
+    delete request;
+  }
+  return computation;
+}
+
+
+void ComputationCache::Read(std::istream &is, bool binary) {
+  // Note: the object on disk doesn't have tokens like "<ComputationCache>"
+  // and "</ComputationCache>" for back-compatibility reasons.
+  int32 computation_cache_size;
+  ExpectToken(is, binary, "<ComputationCacheSize>");
+  ReadBasicType(is, binary, &computation_cache_size);
+  KALDI_ASSERT(computation_cache_size >= 0);
+  computation_cache_.clear();
+  access_queue_.clear();
+  ExpectToken(is, binary, "<ComputationCache>");
+  for (size_t c = 0; c < computation_cache_size; c++) {
+    ComputationRequest request;
+    request.Read(is, binary);
+    NnetComputation *computation = new NnetComputation();
+    computation->Read(is, binary);
+    Insert(request, computation);
+  }
+}
+
+void ComputationCache::Check(const Nnet &nnet) const {
+  CacheType::const_iterator iter = computation_cache_.begin(),
+      end = computation_cache_.end();
+  // We only need to explicitly delete the pointer to the ComputationRequest.
+  // The pointers to Computation are deleted automatically by std::shared_ptr
+  // when the reference count goes to zero.
+  for (; iter != end; ++iter) {
+    const NnetComputation &computation = *(iter->second.first);
+    CheckComputationOptions check_config;
+    ComputationChecker checker(check_config, nnet, computation);
+    checker.Check();
+  }
+}
+
+void ComputationCache::Write(std::ostream &os, bool binary) const {
+  WriteToken(os, binary, "<ComputationCacheSize>");
+  WriteBasicType(os, binary, static_cast<int32>(computation_cache_.size()));
+  WriteToken(os, binary, "<ComputationCache>");
+  for (CacheType::const_iterator iter = computation_cache_.begin();
+           iter != computation_cache_.end(); ++iter) {
+    iter->first->Write(os, binary);
+    iter->second.first->Write(os, binary);
+  }
+}
+
+ComputationCache::~ComputationCache() {
+  CacheType::const_iterator iter = computation_cache_.begin(),
+      end = computation_cache_.end();
+  // We only need to explicitly delete the pointer to the ComputationRequest.
+  // The pointers to Computation are deleted automatically by std::shared_ptr
+  // when the reference count goes to zero.
+  for (; iter != end; ++iter)
+    delete iter->first;
+}
+
 } // namespace nnet3
 } // namespace kaldi
