@@ -14,7 +14,7 @@ final_effective_lrate=0.00003
 num_jobs_initial=2 # Number of neural net jobs to run in parallel at the start of training
 num_jobs_final=8   # Number of neural net jobs to run in parallel at the end of training
 stage=-3
-diagnostic_period=5
+diagnostic_period=2
 compute_accuracy=true
 
 
@@ -136,13 +136,19 @@ while [ $x -lt $num_iters ]; do
     raw="nnet3-copy --learning-rate=$this_learning_rate $dir/$x.raw - |"
 
     if [ $[$x%$diagnostic_period] == 0 ]; then
+        diag_minibatch_size=$minibatch_size
+        if [ $num_archives_processed -lt $[$num_archives*$num_shifts] ] && [ $x -lt 20 ]; then
+          # if we're the first epoch, use half the minibatch size and half the
+          # max-param-change.
+          diag_minibatch_size=$[$minibatch_size/2]
+        fi
       # Set off jobs doing some diagnostics, in the background.
       $cmd JOB=1:$num_diagnostic_archives $dir/log/compute_prob_valid.$x.JOB.log \
         nnet3-xvector-compute-prob --compute-accuracy=${compute_accuracy} $dir/$x.raw \
-        "ark:nnet3-merge-egs --measure-output-frames=false ark:$egs_dir/valid_diagnostic_egs.JOB.ark ark:- |" &
+        "ark:nnet3-merge-egs --measure-output-frames=false --minibatch-size=$diag_minibatch_size ark:$egs_dir/valid_diagnostic_egs.JOB.ark ark:- |" &
       $cmd JOB=1:$num_diagnostic_archives $dir/log/compute_prob_train.$x.JOB.log \
         nnet3-xvector-compute-prob --compute-accuracy=${compute_accuracy} $dir/$x.raw \
-        "ark:nnet3-merge-egs --measure-output-frames=false ark:$egs_dir/train_diagnostic_egs.JOB.ark ark:- |" &
+        "ark:nnet3-merge-egs --measure-output-frames=false --minibatch-size=$diag_minibatch_size ark:$egs_dir/train_diagnostic_egs.JOB.ark ark:- |" &
     fi
     if [ $x -gt 0 ]; then
       $cmd $dir/log/progress.$x.log \

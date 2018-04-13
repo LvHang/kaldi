@@ -29,6 +29,7 @@ if [ $# -lt 1 ] || [ $# -gt 3 ]; then
 fi
 
 data=$1
+
 if [ $# -ge 2 ]; then
   logdir=$2
 else
@@ -45,6 +46,7 @@ featdir=`perl -e '($dir,$pwd)= @ARGV; if($dir!~m:^/:) { $dir = "$pwd/$dir"; } pr
 
 # use "name" as part of name of the archive.
 name=`basename $data`
+
 scp=$data/wav.scp
 
 mkdir -p $featdir || exit 1;

@@ -135,11 +135,16 @@ if [ $stage -le 6 ]; then
     echo " ... please delete and then rerun, or use a later --stage option."
     exit 1;
   fi
-  steps/train_lda_mllt.sh --cmd "$train_cmd" --num-iters 13 \
-    --realign-iters "" \
+  #steps/train_lda_mllt.sh --cmd "$train_cmd" --num-iters 13 \
+  #  --realign-iters "" \
+  #  --splice-opts "--left-context=3 --right-context=3" \
+  #  5000 10000 data/${train_set}_sp_mixed_hires_30k data/lang \
+  #  exp/tri6b_ali_cleaned_30k exp/nnet3${nnet3_affix}/tri7b
+  steps/online/nnet2/get_pca_transform.sh --cmd "$train_cmd" \
     --splice-opts "--left-context=3 --right-context=3" \
-    5000 10000 data/${train_set}_sp_mixed_hires_30k data/lang \
-    exp/tri6b_ali_cleaned_30k exp/nnet3${nnet3_affix}/tri7b
+    --max-utts 10000 --subsample 2 \
+    data/${train_set}_sp_mixed_hires_30k \
+    exp/nnet3${nnet3_affix}/tri7b
 fi
 
 

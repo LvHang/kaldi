@@ -26,8 +26,10 @@ num_diagnostic_percent=5   # we want to test the training and validation likelih
                            # "num_diagnostic_percent"% train data to be valid
 compress=true
 srand=0
-generate_egs_scp=true
 
+frame_length=25  # The frame length when get egs
+left_padding=0   # Use to figure out the number of time axis padding frames
+right_padding=0
 stage=0
 nj=8    # This should be set to the maximum number of jobs you are confortable
         # to run in parallel
@@ -97,12 +99,6 @@ if [ $stage -le 2 ]; then
       scp:$noise_dir/wav.scp $noise_dir/utt2dur_fix \
       ark,scp:$egs_dir/orign_valid_chunks.ark,$egs_dir/orign_valid_chunks.scp
   cp $egs_dir/orign_valid_chunks.scp $data_dir/orign_valid_chunks.scp
-
-  $cmd $egs_dir/log/cut_train_diagnostic_wav_into_chunks.log \
-    fvector-chunk --chunk-size=120 "scp:utils/filter_scp.pl $egs_dir/info/train_diagnostic_uttlist $data_dir/wav.scp |" \
-      scp:$noise_dir/wav.scp $noise_dir/utt2dur_fix \
-      ark,scp:$egs_dir/orign_train_diagnostic_chunks.ark,$egs_dir/orign_train_diagnostic_chunks.scp
-  cp $egs_dir/orign_train_diagnostic_chunks.scp $data_dir/orign_train_diagnostic_chunks.scp
 fi
 
 echo "$0: Generate the egs for train dataset."
@@ -150,7 +146,8 @@ if [ $stage -le 3 ]; then
   #The options could be added in this line
   $cmd JOB=1:$nj $egs_dir/log/do_train_perturbation_and_get_egs.JOB.log \
     fvector-add-noise --max-snr=10 --min-snr=20 scp:$egs_dir/orign_train_chunks.JOB.scp ark:- \| \
-    fvector-get-egs ark:- ark:- \| \
+    fvector-get-egs --frame-length=$frame_length --left-padding=$left_padding \
+      --right-padding=$right_padding ark:- ark:- \| \
     nnet3-copy-egs --random=true --srand=\$[JOB+$srand] ark:- $egs_list || exit 1;
 fi
 
@@ -169,11 +166,8 @@ if [ $stage -le 4 ]; then
   done
 
   if [ $archives_multiple == 1 ]; then # normal case.
-    if $generate_egs_scp; then
-      output_archive="ark,scp:$egs_dir/egs.JOB.ark,$egs_dir/egs.JOB.scp"
-    else
-      output_archive="ark:$egs_dir/egs.JOB.ark"
-    fi
+    output_archive="ark,scp:$egs_dir/egs.JOB.ark,$egs_dir/egs.JOB.scp"
+    
     $cmd --max-jobs-run $nj JOB=1:$num_archives_intermediate $egs_dir/log/shuffle.JOB.log \
       nnet3-shuffle-egs --srand=\$[JOB+$srand] "ark:cat $egs_list|" $output_archive  || exit 1;
 
@@ -191,11 +185,7 @@ if [ $stage -le 4 ]; then
     # otherwise managing the output names is quite difficult (and we don't want
     # to submit separate queue jobs for each intermediate archive, because then
     # the --max-jobs-run option is hard to enforce).
-    if $generate_egs_scp; then
-      output_archives="$(for y in $(seq $archives_multiple); do echo ark,scp:$egs_dir/egs.JOB.$y.ark,$egs_dir/egs.JOB.$y.scp; done)"
-    else
-      output_archives="$(for y in $(seq $archives_multiple); do echo ark:$egs_dir/egs.JOB.$y.ark; done)"
-    fi
+    output_archives="$(for y in $(seq $archives_multiple); do echo ark,scp:$egs_dir/egs.JOB.$y.ark,$egs_dir/egs.JOB.$y.scp; done)"
     for x in $(seq $num_archives_intermediate); do
       for y in $(seq $archives_multiple); do
         archive_index=$[($x-1)*$archives_multiple+$y]
@@ -207,16 +197,14 @@ if [ $stage -le 4 ]; then
       nnet3-shuffle-egs --srand=\$[JOB+$srand] "ark:cat $egs_list|" ark:- \| \
       nnet3-copy-egs ark:- $output_archives || exit 1;
 
-    if $generate_egs_scp; then
-      #concatenate egs.JOB.scp in single egs.scp
-      rm $egs_dir/egs.scp 2> /dev/null || true
-      for j in $(seq $num_archives_intermediate); do
-        for y in $(seq $num_archives_intermediate); do
-          cat $egs_dir/egs.$j.$y.scp || exit 1;
-        done
-      done > $egs_dir/egs.scp || exit 1;
-      for f in $egs_dir/egs.*.*.scp; do rm $f; done
-    fi
+    #concatenate egs.JOB.scp in single egs.scp
+    rm $egs_dir/egs.scp 2> /dev/null || true
+    for j in $(seq $num_archives_intermediate); do
+      for y in $(seq $num_archives_intermediate); do
+        cat $egs_dir/egs.$j.$y.scp || exit 1;
+      done
+    done > $egs_dir/egs.scp || exit 1;
+    for f in $egs_dir/egs.*.*.scp; do rm $f; done
   fi
 fi
 #get egs.$archives_multiple.$num_archives_intermediate.ark 
@@ -226,7 +214,8 @@ echo "$0: Generate the egs for valid dataset"
 if [ $stage -le 5 ]; then
   $cmd $egs_dir/log/do_valid_perturbation_and_get_egs.log \
     fvector-add-noise --max-snr=10 --min-snr=20 scp:$egs_dir/orign_valid_chunks.scp ark:- \| \
-    fvector-get-egs ark:- ark:- \| \
+    fvector-get-egs --frame-length=$frame_length --left-padding=$left_padding \
+      --right-padding=$right_padding ark:- ark:- \| \
     nnet3-copy-egs --random=true --srand=$srand ark:- ark:$egs_dir/valid.egs || exit 1;
   #get the valid.egs
   cp $egs_dir/valid.egs $egs_dir/valid_diagnostic_egs.1.ark
@@ -234,10 +223,10 @@ fi
 
 echo "$0: Generate the egs for train diagnostic"
 if [ $stage -le 6 ];then
+  grep -f ${egs_dir}/info/train_diagnostic_uttlist ${egs_dir}/egs.scp > $egs_dir/train_diagnostic_egs.1.scp
   $cmd $egs_dir/log/do_train_diagnostic_perturbation_and_get_egs.log \
-    fvector-add-noise --max-snr=10 --min-snr=20 scp:$egs_dir/orign_train_diagnostic_chunks.scp ark:- \| \
-    fvector-get-egs ark:- ark:- \| \
-    nnet3-copy-egs --random=true --srand=$srand ark:- ark:$egs_dir/train_diagnostic.egs || exit 1;
+    nnet3-copy-egs --random=true --srand=$srand \
+    scp:$egs_dir/train_diagnostic_egs.1.scp ark:$egs_dir/train_diagnostic.egs || exit 1;
   #get the train_diagnostic.egs
   cp $egs_dir/train_diagnostic.egs $egs_dir/train_diagnostic_egs.1.ark
   echo "1" > $egs_dir/info/num_diagnostic_archives
