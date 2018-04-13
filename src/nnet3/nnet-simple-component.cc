@@ -2923,14 +2923,24 @@ void NaturalGradientAffineComponent::Read(std::istream &is, bool binary) {
   linear_params_.Read(is, binary);
   ExpectToken(is, binary, "<BiasParams>");
   bias_params_.Read(is, binary);
+
+  BaseFloat num_samples_history, alpha;
+  int32 rank_in, rank_out, update_period;
+
   ExpectToken(is, binary, "<RankIn>");
-  ReadBasicType(is, binary, &rank_in_);
+  ReadBasicType(is, binary, &rank_in);
   ExpectToken(is, binary, "<RankOut>");
-  ReadBasicType(is, binary, &rank_out_);
+  ReadBasicType(is, binary, &rank_out);
+  if (PeekToken(is, binary) == 'O') {
+    ExpectToken(is, binary, "<OrthonormalConstraint>");
+    ReadBasicType(is, binary, &orthonormal_constraint_);
+  } else {
+    orthonormal_constraint_ = 0.0;
+  }
   ExpectToken(is, binary, "<UpdatePeriod>");
-  ReadBasicType(is, binary, &update_period_);
+  ReadBasicType(is, binary, &update_period);
   ExpectToken(is, binary, "<NumSamplesHistory>");
-  ReadBasicType(is, binary, &num_samples_history_);
+  ReadBasicType(is, binary, &num_samples_history);
   ExpectToken(is, binary, "<Alpha>");
   ReadBasicType(is, binary, &alpha);
 
