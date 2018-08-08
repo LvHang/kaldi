@@ -141,7 +141,7 @@ int main(int argc, char *argv[]) {
 
           elapsed += timer.Elapsed();
           if (num_success % config.mem_print_freq == 0)
-            get_free_memory_stat("");
+            GetFreeMemoryStat("");
           DecodeUtteranceLatticeFasterCudaOutput(
             decoder, decodable, trans_model, word_syms, utt,
             config.acoustic_scale, determinize, allow_partial, &alignment_writer,

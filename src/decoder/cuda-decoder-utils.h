@@ -109,10 +109,10 @@ const int32 num_colors = sizeof(colors) / sizeof(uint32);
 // host function definition
 
 // get current GPU memory usage
-void get_free_memory_stat(const char *prefix);
+void GetFreeMemoryStat(const char *prefix);
 
 // a combination of cudaMallocManaged & cudaMemAdvise
-void cuda_malloc_managed_preferred_device(void** devPtr, size_t size);
+void CudaMallocManagedPreferredDevice(void** devPtr, size_t size);
 
 // inline host device function definition
 
@@ -277,7 +277,7 @@ class CudaHistogram {
   }
   inline DEVICE int32 Size() const { return (beam_ - beam_lowest_); }
   inline DEVICE void AddScore2LocalHist(BaseFloat cost, int32 *hist_local) {
-    int32 dist = (int)(cost - *best_cost_);
+    int32 dist = (int)(cost - *best_cost_) / step_;
     assert(dist <= beam_);
     if (dist <= beam_lowest_) hist_local[0]++;
     else if (dist == beam_) hist_local[Size() - 1]++;
@@ -297,7 +297,7 @@ class CudaHistogram {
       acc += hist_global_[i];
       if (acc > cutoff_num) break;
     }
-    BaseFloat ret_beam = i + beam_lowest_;
+    BaseFloat ret_beam = step_ * (i + beam_lowest_);
     *cutoff_from_hist = *best_cost_ + ret_beam;
     if (verbose > 2) {
       CUDA_PRINTF(2, "hist_LF %f %i\n", *cutoff_from_hist, acc);
