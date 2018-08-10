@@ -670,4 +670,132 @@ void AlignUtteranceWrapper(
   }
 }
 
+
+DecodeUtteranceLatticeClassCuda::DecodeUtteranceLatticeClassCuda(
+  CudaFst &decode_fst_cuda,
+  CudaLatticeDecoderConfig &config,
+  const TransitionModel &trans_model,
+  const fst::SymbolTable *word_syms,
+  BaseFloat acoustic_scale,
+  bool determinize,
+  bool allow_partial,
+  Int32VectorWriter *alignments_writer,
+  Int32VectorWriter *words_writer,
+  CompactLatticeWriter *compact_lattice_writer,
+  LatticeWriter *lattice_writer,
+  double *like_sum, // on success, adds likelihood to this.
+  int64 *frame_sum, // on success, adds #frames to this.
+  int32 *num_done, // on success (including partial decode), increments this.
+  int32 *num_err,  // on failure, increments this.
+  int32 *num_partial,
+
+  WaitingUtterancesRepository *repository,
+  unordered_map<std:;string,
+    std::queue<CuMatrix<BaseFloat>* > > *finished_inf_utts,
+  unordered_map<std::string, size_t> *finished_dec_utts,
+  const unordered_map<std::string, bool> &is_end,
+  unordered_map<std::string, Semaphore> *utts_semaphores)
+  :  // If partial decode (final-state not reached), increments this.
+     decode_fst_cuda_(decode_fst_cuda), config_(config),
+     trans_model_(trans_model),
+     word_syms_(word_syms), acoustic_scale_(acoustic_scale),
+     determinize_(determinize), allow_partial_(allow_partial),
+     alignments_writer_(alignments_writer),
+     words_writer_(words_writer),
+     compact_lattice_writer_(compact_lattice_writer),
+     lattice_writer_(lattice_writer),
+     like_sum_(like_sum), frame_sum_(frame_sum),
+     num_done_(num_done), num_err_(num_err),
+     num_partial_(num_partial),
+     computed_(false), success_(false), partial_(false),
+     clat_(NULL), lat_(NULL), utt_mutex_(utt_mutex),
+     repository_(repository), finished_inf_utts_(finished_inf_utts),
+     finished_dec_utts_(finished_dec_utts), is_end_(is_end),
+     utts_semaphores_(utts_semaphores) {}
+
+
+void DecodeUtteranceLatticeClassCuda::operator () () {
+  // Decoding and lattice determinization happens here.
+  kaldi::int64 frame_count = 0;
+  int num_success = 0, num_fail = 0;  
+  using fst::VectorFst;
+  double elapsed = 0, elapsed2= 0;
+  Timer timer;
+  double tot_like = 0;
+
+  LatticeFasterDecoderCuda decoder(decode_fst_cuda_, trans_model_, config_);
+
+  std::string utt_this_thread;
+
+  while ((utt_this_thread = (repository_->ProvideUtterance())) != NULL) {
+    timer.Reset();
+    while (! is_end_[utt_this_thread] ||
+           ! finished_inf_utts_[utt_this_thread].empty()) {
+      PUSH_RANGE("whole decoding", 0)
+      PUSH_RANGE("before_decoding", 1)
+      
+      utts_semaphores_[utt_this_thread].Wait();
+      CuMatrix<BaseFloat> &loglikes =
+        *(finished_inf_utts_[utt_this_thread].front());
+      finished_inf_utts_[utt_this_thread].pop_front();
+      finished_dec_utts_[utt_this_thread]++;
+      
+      if (loglikes.NumRows() == 0) {
+        KALDI_WARN << "Thread: " << thread_id_ << " "
+                   << "Zero-length utterance: " << utt;
+        num_fail++;
+        continue;
+      }
+      // Note: In this version, we do it chunk by chunk. So the length of
+      // loglikes should be less than config_.chunk_len
+      MatrixChunker decodable(loglikes, config_.chunk_len);
+      POP_RANGE
+
+      double like;
+      Lattice lat;
+      if (DecodeUtteranceLatticeFasterCuda(
+          decoder, decodable, trans_model_, word_syms_, utt_this_thread,
+          acoustic_scale_, determinize_, allow_partial_, alignments_writer_,
+          words_writer_, compact_lattice_writer_, lattice_writer_,
+          &like, &lat)) {
+        tot_like += like;
+        frame_count += loglikes.NumRows();
+        num_success++;
+      } else num_fail++;
+
+      double t1 = timer.Elapsed();
+      elapsed += t1;
+      if (num_success % config_.mem_print_freq == 0)
+        get_free_memory_stat("");
+    
+      // lock inside
+      DecodeUtteranceLatticeFasterCudaOutput(
+        decoder, decodable, trans_model_, word_syms_, utt_this_thread,
+        acoustic_scale_, determinize_, allow_partial_, alignments_writer_,
+        words_writer_, compact_lattice_writer_, lattice_writer_,
+        &like, lat, utt_mutex_);
+      POP_RANGE
+      elapsed2 = timer.Elapsed() - t1;
+    }
+  }
+  KALDI_LOG << "Thread: " << thread_id_ << " "
+            << "Time taken " << elapsed << " " << elapsed2
+            << "s: real-time factor assuming 100 frames/sec is "
+            << (elapsed * 100.0 / frame_count) << " "
+            << (elapsed2 * 100.0 / frame_count);
+  KALDI_LOG << "Done " << num_success << " utterances, failed for "
+            << num_fail;
+  KALDI_LOG << "Overall log-likelihood per frame is "
+            << (tot_like / frame_count) << " over "
+            << frame_count << " frames.";
+  
+  utt_mutex_->Lock();            
+  if (like_sum_ != NULL) *like_sum_ += tot_like;
+  if (frame_sum_ != NULL) *frame_sum_ += frame_count;
+  if (num_done_ != NULL) (*num_done_) += num_success;
+  if (num_err_ != NULL) (*num_err_) += num_fail;
+  utt_mutex_->Unlock(); 
+}
+
+
 } // end namespace kaldi.

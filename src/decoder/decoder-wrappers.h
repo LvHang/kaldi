@@ -235,6 +235,76 @@ bool DecodeUtteranceLatticeSimple(
   double *like_ptr);  // puts utterance's likelihood in like_ptr on success.
 
 
+Class WaitingUtterancesRepository;
+Class DecodeUtteranceLatticeClassCuda : public MultiThreadable {
+ public:
+  // Initializer sets various variables.
+  // NOTE: we "take ownership" of "decoder" and "decodable".  These
+  // are deleted by the destructor.  On error, "num_err" is incremented.
+  DecodeUtteranceLatticeClassCuda(
+    CudaFst &decode_fst_cuda,
+    CudaLatticeDecoderConfig &config,
+    const TransitionModel &trans_model,
+    const fst::SymbolTable *word_syms,
+    BaseFloat acoustic_scale,
+    bool determinize,
+    bool allow_partial,
+    Int32VectorWriter *alignments_writer,
+    Int32VectorWriter *words_writer,
+    CompactLatticeWriter *compact_lattice_writer,
+    LatticeWriter *lattice_writer,
+    double *like_sum, // on success, adds likelihood to this.
+    int64 *frame_sum, // on success, adds #frames to this.
+    int32 *num_done, // on success (including partial decode), increments this.
+    int32 *num_err,  // on failure, increments this.
+    int32 *num_partial, // If partial decode(final-state not reached),
+                        // increments this
+    Mutex *utt_mutex,
+    WaitingUtterancesRepository *repository,
+    unordered_map<std::string,
+      std::queue<CuMatrix<BaseFloat>* > > *finished_inf_utts,
+    unordered_map<std::string, size_t> *finished_dec_utts,
+    const unordered_map<std::string, bool> &is_end,
+    unordered_map<std::string, Semaphore> *utts_semaphores
+    );
+
+  void operator () (); // The decoding happens here.
+  ~DecodeUtteranceLatticeClassCuda(); // Output happens here
+ private:
+  CudaFst &decode_fst_cuda_;
+  CudaLatticeDecoderConfig &config_;
+
+  const TransitionModel &trans_model_;
+  const fst::SymbolTable *word_syms_;
+  BaseFloat acoustic_scale_;
+  bool determinize_;
+  bool allow_partial_;
+  Int32VectorWriter *alignments_writer_;
+  Int32VectorWriter *words_writer_;
+  CompactLatticeWriter *compact_lattice_writer_;
+  LatticeWriter *lattice_writer_;
+  double *like_sum_;
+  int64 *frame_sum_;
+  int32 *num_done_;
+  int32 *num_err_;
+  int32 *num_partial_;
+
+  // The following variables are stored by the computation.
+  bool computed_; // operator ()  was called.
+  bool success_; // decoding succeeded (possibly partial)
+  bool partial_; // decoding was partial.
+  CompactLattice *clat_; // Stored output, if determinize_ == true.
+  Lattice *lat_; // Stored output, if determinize_ == false.
+
+  Mutex *utt_mutex_;
+  WaitingUtterancesRepository *repository_;
+  unordered_map<std::string,
+    std::queue<const CuMatrix<BaseFloat>& > *finished_inf_utts_;
+  unordered_map<std::string, size_t> *finished_dec_utts_;
+  const unordered_map<std::string, bool> &is_end_;
+  unordered_map<std::string, Semaphore> *utts_semaphores_;
+
+};
 
 } // end namespace kaldi.
 
