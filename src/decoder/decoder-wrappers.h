@@ -298,10 +298,15 @@ Class DecodeUtteranceLatticeClassCuda : public MultiThreadable {
 
   Mutex *utt_mutex_;
   WaitingUtterancesRepository *repository_;
+  // The warehouse of log-likelihood. Each item in the queue corresponds to a
+  // chunk of log-likelihood.
   unordered_map<std::string,
     std::queue<const CuMatrix<BaseFloat>& > *finished_inf_utts_;
+  // Record the number of chunks has been used. When any chunk it consumed, it
+  // will increase.
   unordered_map<std::string, size_t> *finished_dec_utts_;
   const unordered_map<std::string, bool> &is_end_;
+  // help decoding thread judge whether any chunk is available.
   unordered_map<std::string, Semaphore> *utts_semaphores_;
 
 };

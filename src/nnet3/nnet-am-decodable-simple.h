@@ -579,7 +579,10 @@ class BatchComputer {
   // in function "compute()" which is a blocking call, we will keep on
   // computing without taking the results out.
   std::list<std::string> utt_list_;
-
+  
+  // record the number of chunks is generated for each utterance. It is used
+  // in function PrepareBatchInfo(). It helps the function PrepareBatchInfo()
+  // to figure out which things are most convenient to compute first. 
   std::unordered_map<std::string, size_t> prepared_chunk_record_;
 
   // The meaning of the tuple is
@@ -645,12 +648,21 @@ Class BatchComputerClass : public MultiThreadable {
   BatchComputer& batch_computer_;
   int32 num_max_chunks_;
   int32 *chunk_counter_;
+  // This is the warehouse of log-likelihood. The results in it will be
+  // accessed by decoder.
   std::unordered_map<std::string,
     std::queue<CuMatrix<BaseFloat>* > > *finished_inf_utts_;
+  // It will be passed to function PrepareBatchInfo() of class BatchComputer to
+  // help BatchComputer figure out which things are most convenient to compute
+  // first.
   std::unordered_map<std::string, size_t> &finished_dec_utts_;
+  // use to record if an utterance has been finished.
   std::unordered_map<std::string, bool> *is_end_;
+  // When a new chunk is generated, the corresponding semaphore will be signal.
   std::unordered_map<std::string, Semaphore> *utts_semaphores_;
   WaitingUtteranceRepository *repository_;
+  // protect the process of PrepareBatchInfo(). In this procedure, "finished_
+  // dec_utts_" will not be changed.
   Mutex *utt_mutex_;
 };
 

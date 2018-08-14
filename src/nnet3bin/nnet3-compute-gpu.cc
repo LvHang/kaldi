@@ -58,7 +58,7 @@ int main(int argc, char *argv[]) {
     NnetSimpleComputationOptions opts;
     opts.acoustic_scale = 1.0;  // by default do no scaling in this recipe.
 
-    bool apply_exp = false, use_priors = false;
+    bool apply_exp = false, use_priors = true;
     std::string use_gpu = "yes";
 
     std::string ivector_rspecifier,
@@ -105,7 +105,8 @@ int main(int argc, char *argv[]) {
                 "threads to run in parallel.");
     po.Register("word-symbol-table", &word_syms_filename, "Symbol table for "
                 "words [for debug output].");
-
+    
+    // The following is controller options
     int32 num_max_chunks = 512;
     int32 num_max_utts = 10;
     po.Register("num-max-chunks", &num_max_chunks, "The maximum number of "
