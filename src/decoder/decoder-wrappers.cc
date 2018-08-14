@@ -748,7 +748,7 @@ void DecodeUtteranceLatticeClassCuda::operator () () {
       }
       // Note: In this version, we do it chunk by chunk. So the length of
       // loglikes should be less than config_.chunk_len
-      MatrixChunker decodable(loglikes, config_.chunk_len);
+      CuMatrixChunker decodable(loglikes, config_.chunk_len);
       POP_RANGE
 
       double like;
