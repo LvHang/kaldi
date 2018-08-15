@@ -21,15 +21,12 @@
 #define KALDI_CUDA_DECODER_UTILS_H_
 
 
-#include <cuda_runtime.h>
-#include <cuda_runtime_api.h>
-#include "cuda_runtime.h"
 #include <algorithm>
+#include "cuda_runtime.h"
 #include <cuda_runtime_api.h>
 #include <float.h>
 #include <math.h>
 #include <cooperative_groups.h>
-#include "math_constants.h"
 
 #include "util/stl-utils.h"
 #include "hmm/transition-model.h"
@@ -71,8 +68,8 @@ const int32 num_colors = sizeof(colors) / sizeof(uint32);
     eventAttrib.messageType = NVTX_MESSAGE_TYPE_ASCII; \
     eventAttrib.message.ascii = name; \
     nvtxRangePushEx(&eventAttrib); \
-} while (0);
-#define POP_RANGE nvtxRangePop();
+} while (0)
+#define POP_RANGE nvtxRangePop()
 #else
 #define PUSH_RANGE(name,cid)
 #define POP_RANGE
@@ -182,29 +179,25 @@ inline DEVICE int binsearch_maxle(const int *vec, const int val, int low,
 }
 
 
-// fast load 16 bits using CUDA ASM
+// fast load 16 bytes using CUDA ASM
 inline  DEVICE void fast_load16(void *a, const void *b) {
   const ulong2 *src = reinterpret_cast<const ulong2*>(b);
   ulong2 &dst = *reinterpret_cast<ulong2*>(a);
   asm("ld.global.v2.u64 {%0,%1}, [%2];" : "=l"(dst.x), "=l"(dst.y) : "l"(src));
 }
 
-// fast store 16 bits using CUDA ASM
+// fast store 16 bytes using CUDA ASM
 inline  DEVICE void fast_store16(void *a, const void *b) {
   const ulong2 src = *reinterpret_cast<const ulong2*>(b);
   asm("st.global.v2.u64 [%0], {%1,%2};" :: "l"(a), "l"(src.x), "l"(src.y));
 }
 
-// fast store 8 bits using CUDA ASM
+// fast store 8 bytes using CUDA ASM
 inline  DEVICE void fast_store8(void *a, const void *b) {
-#if 0
-  memcpy(a, b, 8);
-#else
   *(uint64*)a = (*(uint64*)b);
-#endif
 }
 
-// TODO: we need a fast 32 bits storing function
+// TODO: we need a fast 32 bytes storing function
 inline  DEVICE void fast_store32(void *a, const void *b) {
   memcpy(a, b, 32);
 }
@@ -249,7 +242,6 @@ static DEVICE inline void _grid_sync(volatile int *fast_epoch) {
     __threadfence();
     atomicAdd((int*)fast_epoch, nb);
     // wait for the sign bit to commute
-    int cnt = 0;
     while (((*fast_epoch) ^ old_epoch) >= 0) ;
   }
   __syncthreads();
@@ -329,21 +321,22 @@ class CudaFst {
   void Initialize(const fst::Fst<StdArc> &fst);
   void Finalize();
 
-  uint32 NumStates() const {  return numStates; }
-  uint32 NumArcs() const {  return numArcs; }
+  uint32 NumStates() const {  return num_states_; }
+  uint32 NumArcs() const {  return num_arcs; }
   StateId Start() const { return start; }
   HOST DEVICE BaseFloat Final(StateId state) const;
   size_t GetCudaMallocBytes() const { return bytes_cudaMalloc; }
 
-  uint32 numStates;               // total number of states
-  uint32 numArcs;               // total number of states
+  // Should these fields be private?
+  uint32 num_states_;               // total number of states
+  uint32 num_arcs;               // total number of states
   StateId  start;
 
   uint32 max_ilabel;              // the largest ilabel
   uint32 e_count, ne_count,
          arc_count;       // number of emitting and non-emitting states
 
-  // This data structure have 2 matrices (one emitting one non-emitting).
+  // This data structure has 2 CSR matrices (one emitting, one non-emitting).
   // Offset arrays are numStates+1 in size.
   // Arc values for state i are stored in the range of [i,i+1)
   // size numStates+1
@@ -366,11 +359,8 @@ class CudaFst {
 class MatrixChunker {
 #define DEC_CHUNK_BUF_SIZE 2
  public:
-  // This constructor creates an object that will not delete "likes"
-  // when done.
-  MatrixChunker(const Matrix<BaseFloat> &likes, int chunk_len): likes_(&likes),
-    delete_likes_(false), chunk_len_(chunk_len), chunk_id_(0) {
-  }
+  MatrixChunker(const Matrix<BaseFloat> &likes, int chunk_len):
+    likes_(&likes), chunk_len_(chunk_len), chunk_id_(0) { }
 
   int32 NumFramesReady() const { return likes_->NumRows(); }
 
@@ -383,7 +373,7 @@ class MatrixChunker {
     if (frame >= likes_->NumRows()) return;
     int len = std::min(chunk_len_, likes_->NumRows() - frame);
     assert(len);
-    CuMatrix<BaseFloat>& loglike_d = loglikes_d[++chunk_id_ % DEC_CHUNK_BUF_SIZE];
+    CuMatrix<BaseFloat>& loglike_d = loglikes_d_[++chunk_id_ % DEC_CHUNK_BUF_SIZE];
     int data_size = likes_->NumCols() * sizeof(BaseFloat);
     CU_SAFE_CALL(cudaGetLastError());
     // we seldom Resize()
@@ -397,16 +387,12 @@ class MatrixChunker {
     return;
   };
 
-  ~MatrixChunker() {
-    if (delete_likes_) delete likes_;
-  }
-  
   const Matrix<BaseFloat> *likes_;
-  bool delete_likes_;
-  CuMatrix<BaseFloat> loglikes_d[DEC_CHUNK_BUF_SIZE];
+  CuMatrix<BaseFloat> loglikes_d_[DEC_CHUNK_BUF_SIZE];
 
   int chunk_len_, chunk_id_;
   KALDI_DISALLOW_COPY_AND_ASSIGN(MatrixChunker);
+#undef DEC_CHUNK_BUF_SIZE
 };
 
 class CuMatrixScaledMapper {
@@ -414,7 +400,7 @@ class CuMatrixScaledMapper {
   CuMatrixScaledMapper() : id2pdf_d_(NULL), acoustic_scale_(0),
     loglike_d_(NULL) {}
   CuMatrixScaledMapper(int32 *id2pdf_d, BaseFloat acoustic_scale,
-                                BaseFloat* loglike_d) : id2pdf_d_(id2pdf_d),
+                       BaseFloat* loglike_d) : id2pdf_d_(id2pdf_d),
     acoustic_scale_(acoustic_scale), loglike_d_(loglike_d) {}
   DEVICE BaseFloat LogLikelihood(int32 tid) const {
     assert(id2pdf_d_);
@@ -423,7 +409,8 @@ class CuMatrixScaledMapper {
   }
  private:
   int32 *id2pdf_d_;
-  BaseFloat acoustic_scale_, *loglike_d_;
+  BaseFloat acoustic_scale_;
+  BaseFloat *loglike_d_;
 };
 
 

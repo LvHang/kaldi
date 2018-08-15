@@ -193,6 +193,7 @@ DEVICE static inline void _compute_degrees_kernel(processTokens_params* params) 
                 blk_scan_offset = total;
             }
         }
+        __syncthreads(); // blk_scan_offset
         if (threadIdx.x == 0) {
             *params->tot_narcs_d_ = blk_scan_offset;
             *params->tot_narcs_h_ = blk_scan_offset; // pinned memory
@@ -259,7 +260,6 @@ static void _get_cutoff(processTokens_params params) {
     __shared__ typename BlockScan::TempStorage temp_storage_scan;
     __shared__ typename BlockReduce::TempStorage temp_storage_reduce;
 
-    __shared__ int new_q_block_off;
     __shared__ BaseFloat global_cutoff;
 
     const int total_narcs = *params.tot_narcs_d_;
@@ -275,7 +275,6 @@ static void _get_cutoff(processTokens_params params) {
         int th_idx = block_offset + threadIdx.x;
         bool valid_input = (th_idx < total_narcs);
 
-        StateId prev_state;
         BaseFloat total_cost = FLT_MAX;
         int arc_idx;
         StateId arc_next_state;
@@ -289,8 +288,6 @@ static void _get_cutoff(processTokens_params params) {
                                                    old_q_size - 1);
             // the outgoing arc number of the token, used to obtain arc_idx
             int lower_bound = params.narcs_scan_d_[q_idx - old_q_offset];
-            // the state of the token
-            prev_state = params.d_q[q_idx]; 
             // the starting arc_id of out-going arcs from the token
             int arc_offset_start = params.arc_offset_pertok_d_[q_idx - old_q_offset];
             // the arc id in the WFST
@@ -361,7 +358,6 @@ static void _expand_arcs_kernel(processTokens_params params) {
         int th_idx = block_offset + threadIdx.x;
         bool valid_input = (th_idx < total_narcs);
 
-        StateId prev_state;
         BaseFloat total_cost = FLT_MAX;
         int arc_idx;
         StateId arc_next_state;
@@ -376,8 +372,6 @@ static void _expand_arcs_kernel(processTokens_params params) {
                                                    old_q_size - 1);
             // the outgoing arc number of the token, used to obtain arc_idx
             int lower_bound = params.narcs_scan_d_[q_idx - old_q_offset];
-            // the state of the token
-            prev_state = params.d_q[q_idx];
             // the starting arc_id of out-going arcs from the token
             int arc_offset_start = params.arc_offset_pertok_d_[q_idx - old_q_offset];
             // the arc id in the WFST
@@ -508,7 +502,6 @@ static void _get_best_path_kernel(int best_token_idx_in_all_tokens,
     int idx = 0;
 
     while (tok_idx != INT_MIN) {
-        int state = d_all_tokens[tok_idx];
         int arc_idx = d_all_tokens_info[tok_idx].arc_idx;
         reversed_path_d_[idx++] = arc_idx;
 
@@ -732,7 +725,6 @@ CudaDecoder::CudaDecoder(const CudaFst &fst, const TransitionModel &trans_model,
                          const CudaDecoderConfig &config): fst_(fst),
     trans_model_(trans_model),
     config_(config) {
-    int max_token = config.max_tokens;
 
     cudaStreamCreate(&stream_comp);
     cudaStreamCreate(&stream_ll);
@@ -757,7 +749,7 @@ CudaDecoder::CudaDecoder(const CudaFst &fst, const TransitionModel &trans_model,
                (max_token_frame / COMPUTE_DEGREES_DIMX + 2)* sizeof(int));
     cudaMalloc(&arc_offset_pertok_d_, max_token_frame * sizeof(int));
 
-    cudaMalloc(&state_pack_d_, sizeof(uint64)*fst_.numStates);
+    cudaMalloc(&state_pack_d_, sizeof(uint64)*fst_.NumStates());
 
     cudaMallocHost(&reached_final_h_, sizeof(int));
 
@@ -870,12 +862,11 @@ void CudaDecoder::Decode(MatrixChunker *decodable) {
     while ( !decodable->IsLastFrame(num_frames_decoded_ - 1)) {
         bool last_frame = decodable->IsLastFrame(num_frames_decoded_ - 0);
 
-        PUSH_RANGE("ComputeLogLikelihoods", 3)
-        int chunk_len;
+        PUSH_RANGE("ComputeLogLikelihoods", 3);
         CuMatrix<BaseFloat> *post_chunk;
         decodable->LogLikelihoodChunk(num_frames_decoded_, &post_chunk, stream_ll);
         cudaEventRecord(event_ll, stream_ll);
-        POP_RANGE
+        POP_RANGE;
         DecodeChunk(post_chunk);
 
         if (last_frame) {
@@ -989,8 +980,10 @@ BaseFloat CudaDecoder::FinalRelativeCost() const {
     return (best_cost_final - best_cost);
 }
 
+// TODO: Change 4-space indents to 2-space indents.
+
 void CudaDecoder::InitLookup() {
-    int nstates = fst_.numStates;
+  int nstates = fst_.NumStates();
 
 
     dim3 grid, block;
@@ -1120,7 +1113,6 @@ void CudaDecoder::GetBestCost(BaseFloat *min, int *arg, bool isfinal) const {
     void *d_temp_storage_amin = NULL;
     size_t temp_storage_amin_bytes = 0;
 
-    int max_t = config_.max_tokens;
     cub::DeviceReduce::ArgMin(d_temp_storage_amin, temp_storage_amin_bytes,
                               state_pack_d_, d_argmin, *tot_ntok_h_);
     cudaMalloc(&d_temp_storage_amin, temp_storage_amin_bytes);
