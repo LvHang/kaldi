@@ -426,13 +426,16 @@ class CuMatrixScaledMapper {
   BaseFloat acoustic_scale_, *loglike_d_;
 };
 
+
+// This class is used in gpu-decoding stuff. In this stuff, the BatchComputer
+// generate the log-likelihoods chunk by chunk. This class is just used to pass
+// the address.
 class CuMatrixChunker {
-#define DEC_CHUNK_BUF_SIZE 2
  public:
   // This constructor creates an object that will not delete "likes"
-  // when done.
+  // when done. So the CuMatrixChunker gets one chunk each time.
   CuMatrixChunker(const CuMatrix<BaseFloat> &likes, int chunk_len): likes_(&likes),
-    delete_likes_(false), chunk_len_(chunk_len), chunk_id_(0) {
+    delete_likes_(false), chunk_len_(chunk_len) {
   }
 
   int32 NumFramesReady() const { return likes_->NumRows(); }
@@ -442,33 +445,25 @@ class CuMatrixChunker {
     return (frame == NumFramesReady() - 1);
   }
 
-  void LogLikelihoodChunk(int32 frame, CuMatrix<BaseFloat>** out, cudaStream_t stream) {
+  void LogLikelihoodChunk(int32 frame, CuMatrixBase<BaseFloat>** out, cudaStream_t stream) {
     if (frame >= likes_->NumRows()) return;
     int len = std::min(chunk_len_, likes_->NumRows() - frame);
     assert(len);
-    CuMatrix<BaseFloat>& loglike_d = loglikes_d[++chunk_id_ % DEC_CHUNK_BUF_SIZE];
-    int data_size = likes_->NumCols() * sizeof(BaseFloat);
-    CU_SAFE_CALL(cudaGetLastError());
-    // we seldom Resize()
-    if (loglike_d.NumRows() != len) loglike_d.Resize(len, likes_->NumCols(), kUndefined);
-    // we need cudaMemcpyAsync with stream and cannot use kaldi::CopyFromMat
-    // as they have different strides, we have to do this
-    cudaMemcpy2DAsync(loglike_d.Data(), loglike_d.Stride()*sizeof(BaseFloat), likes_->Row(frame).Data(), 
-                      likes_->Stride()*sizeof(BaseFloat), data_size, len, cudaMemcpyDeviceToDevice, stream);
-    CU_SAFE_CALL(cudaGetLastError());
-    *out = &loglike_d;
+    loglikes_ = new CuSubMatrix<BaseFloat>(likes_->RowRange(frame, len));
+    *out = loglikes_;
     return;
   };
 
   ~CuMatrixChunker() {
     if (delete_likes_) delete likes_;
+    delete loglikes_;
   }
   
   const CuMatrix<BaseFloat> *likes_;
   bool delete_likes_;
-  CuMatrix<BaseFloat> loglikes_d[DEC_CHUNK_BUF_SIZE];
+  CuMatrixBase<BaseFloat>* loglikes_;
 
-  int chunk_len_, chunk_id_;
+  int chunk_len_;
   KALDI_DISALLOW_COPY_AND_ASSIGN(CuMatrixChunker);
 };
 
