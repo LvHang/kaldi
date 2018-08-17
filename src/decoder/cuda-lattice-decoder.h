@@ -495,8 +495,9 @@ class CudaLatticeDecoder {
   // decodable object, then increments num_frames_decoded_.
   void ProcessTokens();
   void ProcessNonemitting(); // only called at frame 0
-  void DecodeChunk(CuMatrix<BaseFloat>* post_chunk);
+  void DecodeChunk(CuMatrixBase<BaseFloat>* post_chunk);
   void Decode(MatrixChunker *decodable);
+  void Decode(CuMatrixChunker *decodable);
 
   // lattice processing functions
   void FinalProcessLattice(Token** toks_buf, int** toks_fr_sidx, 

@@ -65,6 +65,7 @@ class LatticeFasterDecoderCuda {
   // final state).
   // the main procedure is done in GPU
   bool Decode(MatrixChunker *decodable);
+  bool Decode(CuMatrixChunker *decodable);
 
   // the same to the version in lattice-faster-decoder.h
   // says whether a final-state was active on the last frame.  If it was not, the

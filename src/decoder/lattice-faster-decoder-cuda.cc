@@ -97,6 +97,36 @@ bool LatticeFasterDecoderCuda::Decode(MatrixChunker *decodable) {
   return !active_toks_.empty() && active_toks_.back().toks != NULL;
 }
 
+bool LatticeFasterDecoderCuda::Decode(CuMatrixChunker *decodable) {
+  PUSH_RANGE("CudaLatticeDecoder::Decode::init_search", 0);
+  InitDecoding(); // CPU init
+  decoder_.InitDecoding(); // GPU init
+  decoder_.Decode(decodable);
+  POP_RANGE;
+
+  PUSH_RANGE("CudaLatticeDecoder::Decode::final", 1);
+  cuToken* toks_buf;
+  int* toks_sidx;
+  LatLink* arcs_buf;
+  int* arcs_size;
+  cuTokenVector* last_tokv;
+  // GPU lattice processing and D2H data trasnfer
+  int num_frames_decoded;
+  decoder_.FinalProcessLattice(&toks_buf, &toks_sidx, &arcs_buf, 
+                               &arcs_size, &last_tokv, &num_frames_decoded);
+  // CPU lattice processing
+  FinalProcessLattice(last_tokv, toks_buf, toks_sidx, arcs_buf, arcs_size,
+                      num_frames_decoded);
+  // final lattice arc pruning and state trims
+  // it is the same to CPU decoder in lattice-faster-decoder.h
+  FinalizeDecoding();   
+  // Returns true if we have any kind of traceback available (not necessarily
+  // to the end state; query ReachedFinal() for that).
+  POP_RANGE;
+  assert(NumFramesDecoded() == NumFramesDecoded());
+  return !active_toks_.empty() && active_toks_.back().toks != NULL;
+}
+
 // a map from packed uint64 to the corresponding CPU Token address
 inline LatticeFasterDecoderCuda::Token* LatticeFasterDecoderCuda::
                                         ActiveToksMap(void* p) const {

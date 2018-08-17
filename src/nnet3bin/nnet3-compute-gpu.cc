@@ -28,9 +28,7 @@
 #include "cudamatrix/cu-device.h"
 #include "util/kaldi-thread.h"
 #include "decoder/cuda-decoder-utils.h"
-#include "decoder/lattice-faster-decoder-cuda.h"
 #include "decoder/cuda-lattice-decoder.h"
-#include "decoder/decoder-wrappers.h"
 
 
 int main(int argc, char *argv[]) {

@@ -1558,7 +1558,7 @@ void CudaLatticeDecoder::ProcessNonemitting() {
 }
 
 
-void CudaLatticeDecoder::DecodeChunk(CuMatrix<BaseFloat> *post_chunk) {
+void CudaLatticeDecoder::DecodeChunk(CuMatrixBase<BaseFloat> *post_chunk) {
   int chunk_used_len=0;
   while (chunk_used_len < post_chunk->NumRows()) {
     // one frame from the chunk
@@ -1585,6 +1585,29 @@ void CudaLatticeDecoder::Decode(MatrixChunker *decodable) {
 
     PUSH_RANGE("ComputeLogLikelihoods", 3);
     CuMatrix<BaseFloat> *post_chunk;
+    decodable->LogLikelihoodChunk(num_frames_decoded_, &post_chunk, stream_ll);
+    cudaEventRecord(event_ll, stream_ll);
+    POP_RANGE;
+    DecodeChunk(post_chunk);
+
+    if (last_frame) {
+      KALDI_VLOG(5) << "last frame: " << NumFramesDecoded();
+      break;
+    }
+  }
+}
+
+void CudaLatticeDecoder::Decode(CuMatrixChunker *decodable) {
+  while ( !decodable->IsLastFrame(num_frames_decoded_ - 1)) {
+    bool last_frame = decodable->IsLastFrame(num_frames_decoded_ - 0);
+    if (num_frames_decoded_ + 1 >= config_.max_len) {
+      last_frame = true;
+      KALDI_WARN << "the utterance is too long, cutoff after frames: " 
+                 << num_frames_decoded_ + 1;
+    }
+
+    PUSH_RANGE("ComputeLogLikelihoods", 3);
+    CuMatrixBase<BaseFloat> *post_chunk;
     decodable->LogLikelihoodChunk(num_frames_decoded_, &post_chunk, stream_ll);
     cudaEventRecord(event_ll, stream_ll);
     POP_RANGE;

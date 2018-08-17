@@ -17,7 +17,7 @@
 // See the Apache 2 License for the specific language governing permissions and
 // limitations under the License.
 
-#include "decoder/decoder-controller.cc"
+#include "decoder/decoder-controller.h"
 
 Controller::Controller(
     const NnetSimpleComputations &opts,

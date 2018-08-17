@@ -29,6 +29,7 @@
 #include "nnet3/nnet-compute.h"
 #include "nnet3/am-nnet-simple.h"
 #include "util/kaldi-thread.h"
+#include "decoder/decoder-wrappers.h"
 
 namespace kaldi {
 namespace nnet3 {
@@ -640,7 +641,7 @@ Class BatchComputerClass : public MultiThreadable {
     const std::unordered_map<std::string, size_t> &finished_dec_utts,
     std::unordered_map<std::string, bool> *is_end,
     std::unordered_map<std::string, Semaphore> *utts_semaphores,
-    WaitingUtteranceRepository *repository,
+    WaitingUtterancesRepository *repository,
     Mutex *utt_mutex);
   void operator () (); // The batch computing happens here
   ~BatchComputerClass() {}
@@ -660,7 +661,7 @@ Class BatchComputerClass : public MultiThreadable {
   std::unordered_map<std::string, bool> *is_end_;
   // When a new chunk is generated, the corresponding semaphore will be signal.
   std::unordered_map<std::string, Semaphore> *utts_semaphores_;
-  WaitingUtteranceRepository *repository_;
+  WaitingUtterancesRepository *repository_;
   // protect the process of PrepareBatchInfo(). In this procedure, "finished_
   // dec_utts_" will not be changed.
   Mutex *utt_mutex_;

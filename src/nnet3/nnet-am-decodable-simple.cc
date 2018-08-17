@@ -1095,7 +1095,7 @@ BatchComputerClass::BatchComputerClass(
   const std::unordered_map<std::string, size_t> &finished_dec_utts,
   std::unordered_map<std::string, bool> *is_end,
   std::unordered_map<std::string, Semaphore> *utts_semaphores,
-  WaitingUtteranceRepository *repository,
+  WaitingUtterancesRepository *repository,
   Mutex *utt_mutex) :
   batch_computer_(batch_computer), num_max_chunks(num_max_chunks),
   chunk_counter_(chunk_counter), finished_inf_utts_(finished_inf_utts),

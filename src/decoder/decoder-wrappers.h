@@ -113,12 +113,50 @@ bool DecodeUtteranceLatticeFasterCuda(
   double *like_ptr,
   Lattice* olat);
 
+
+// Overload function. Use a CuMatrixChunker.
+// GPU decoding interface of decoding and lattice processing
+bool DecodeUtteranceLatticeFasterCuda(
+  LatticeFasterDecoderCuda &decoder, // not const but is really an input.
+  CuMatrixChunker &decodable, // not const but is really an input.
+  const TransitionModel &trans_model,
+  const fst::SymbolTable *word_syms,
+  std::string utt,
+  double acoustic_scale,
+  bool determinize,
+  bool allow_partial,
+  Int32VectorWriter *alignment_writer,
+  Int32VectorWriter *words_writer,
+  CompactLatticeWriter *compact_lattice_writer,
+  LatticeWriter *lattice_writer,
+  double *like_ptr,
+  Lattice* olat);
+
+
 // GPU decoding interface of outputting lattice
 // use a separate interface is to do the output in a critical section
 // e.g. using #pragma omp critical { }
 bool DecodeUtteranceLatticeFasterCudaOutput(
   LatticeFasterDecoderCuda &decoder, // not const but is really an input.
   MatrixChunker &decodable, // not const but is really an input.
+  const TransitionModel &trans_model,
+  const fst::SymbolTable *word_syms,
+  std::string utt,
+  double acoustic_scale,
+  bool determinize,
+  bool allow_partial,
+  Int32VectorWriter *alignment_writer,
+  Int32VectorWriter *words_writer,
+  CompactLatticeWriter *compact_lattice_writer,
+  LatticeWriter *lattice_writer,
+  double *like_ptr,
+  Lattice& lat,
+  std::mutex *examples_mutex_ = NULL);
+
+// Overload function with CuMatrixChunker
+bool DecodeUtteranceLatticeFasterCudaOutput(
+  LatticeFasterDecoderCuda &decoder, // not const but is really an input.
+  CuMatrixChunker &decodable, // not const but is really an input.
   const TransitionModel &trans_model,
   const fst::SymbolTable *word_syms,
   std::string utt,
@@ -235,8 +273,79 @@ bool DecodeUtteranceLatticeSimple(
   double *like_ptr);  // puts utterance's likelihood in like_ptr on success.
 
 
-Class WaitingUtterancesRepository;
-Class DecodeUtteranceLatticeClassCuda : public MultiThreadable {
+/** This struct stores the waiting utterances to be used in
+    multi-threaded gpu decoding.  */
+class WaitingUtterancesRepository {
+ public:
+  /// The following function is called by the code that reads in the utterances.
+  void AcceptUtterance(std::string utt_id) {
+    empty_semaphore_.Wait();
+    utts_mutex_.lock();
+    utts_.push_back(utt_id);
+    utts_mutex_.unlock();
+    full_semaphore_.Signal();
+  }
+
+  /// The following function is called by the code that reads in the utterances,
+  /// when we're done reading utterances; it signals this way to this class
+  /// that the stream is now empty
+  void UtterancesDone() {
+    for (int32 i = 0; i < buffer_size_; i++)
+      empty_semaphore_.Wait();
+    utts_mutex_.lock();
+    KALDI_ASSERT(utts_.empty());
+    utts_mutex_.unlock();
+    done_ = true;
+    full_semaphore_.Signal();
+  }
+
+  /// This function is called by the code that does gpu decoding.  If there is
+  /// an example available it will provide it, or it will sleep till one is
+  /// available.  It returns NULL when there are no utterances left and
+  /// UtterancesDone() has been called.
+  std::string *ProvideUtterance() {
+    full_semaphore_.Wait();
+    if (done_) {
+      KALDI_ASSERT(utts_.empty());
+      full_semaphore_.Signal(); // Increment the semaphore so
+      // the call by the next thread will not block.
+      return NULL; // no examples to return-- all finished.
+    } else {
+      utts_mutex_.lock();
+      KALDI_ASSERT(!utts_.empty());
+      std::string *ans = &(utts_.front());
+      utts_.pop_front();
+      utts_mutex_.unlock();
+      empty_semaphore_.Signal();
+      return ans;
+    }
+  }
+
+
+  bool Done() {
+    if (done_) {
+      return true;
+    }
+    return false;
+  }
+
+  WaitingUtterancesRepository(int32 buffer_size = 128):
+                              buffer_size_(buffer_size),
+                              empty_semaphore_(buffer_size_),
+                              done_(false) { }
+ private:
+  int32 buffer_size_;
+  Semaphore full_semaphore_;
+  Semaphore empty_semaphore_;
+  std::mutex utts_mutex_; // mutex we lock to modify examples_.
+
+  std::deque<std::string> utts_;
+  bool done_;
+  KALDI_DISALLOW_COPY_AND_ASSIGN(WaitingUtterancesRepository);
+};
+
+
+class DecodeUtteranceLatticeClassCuda : public MultiThreadable {
  public:
   // Initializer sets various variables.
   // NOTE: we "take ownership" of "decoder" and "decodable".  These
@@ -259,10 +368,10 @@ Class DecodeUtteranceLatticeClassCuda : public MultiThreadable {
     int32 *num_err,  // on failure, increments this.
     int32 *num_partial, // If partial decode(final-state not reached),
                         // increments this
-    Mutex *utt_mutex,
+    std::mutex *utt_mutex,
     WaitingUtterancesRepository *repository,
     unordered_map<std::string,
-      std::queue<CuMatrix<BaseFloat>* > > *finished_inf_utts,
+      std::queue<const CuMatrix<BaseFloat>* > > *finished_inf_utts,
     unordered_map<std::string, size_t> *finished_dec_utts,
     const unordered_map<std::string, bool> &is_end,
     unordered_map<std::string, Semaphore> *utts_semaphores
@@ -296,12 +405,12 @@ Class DecodeUtteranceLatticeClassCuda : public MultiThreadable {
   CompactLattice *clat_; // Stored output, if determinize_ == true.
   Lattice *lat_; // Stored output, if determinize_ == false.
 
-  Mutex *utt_mutex_;
+  std::mutex *utt_mutex_;
   WaitingUtterancesRepository *repository_;
   // The warehouse of log-likelihood. Each item in the queue corresponds to a
   // chunk of log-likelihood.
   unordered_map<std::string,
-    std::queue<const CuMatrix<BaseFloat>& > *finished_inf_utts_;
+                std::queue<const CuMatrix<BaseFloat>* > > *finished_inf_utts_;
   // Record the number of chunks has been used. When any chunk it consumed, it
   // will increase.
   unordered_map<std::string, size_t> *finished_dec_utts_;
