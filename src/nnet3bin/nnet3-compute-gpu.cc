@@ -17,7 +17,6 @@
 // See the Apache 2 License for the specific language governing permissions and
 // limitations under the License.
 
-
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
 #include "nnet3/nnet-am-decodable-simple.h"
@@ -29,12 +28,15 @@
 #include "util/kaldi-thread.h"
 #include "decoder/cuda-decoder-utils.h"
 #include "decoder/cuda-lattice-decoder.h"
+#include "decoder/decoder-controller.h"
 
 
 int main(int argc, char *argv[]) {
   try {
     using namespace kaldi;
     using namespace kaldi::nnet3;
+    using fst::Fst;
+    using fst::StdArc;
     typedef kaldi::int32 int32;
     typedef kaldi::int64 int64;
 
@@ -47,7 +49,7 @@ int main(int argc, char *argv[]) {
         "PCI-E bottleneck.\n"
         "Usage: nnet3-compute-gpu [options] <nnet-in> <trans-model-in> "
         "<fst-in-str> <features-rspecifier> <lattice-wspecifier> "
-        "[ words-wspecifier [alignments-wspecifier] ]\n"
+        "[ words-wspecifier [alignments-wspecifier] ]\n";
 
     ParseOptions po(usage);
     Timer timer;
@@ -98,7 +100,7 @@ int main(int argc, char *argv[]) {
     int32 num_threads = 1;
     std::string word_syms_filename;
     po.Register("allow-partial", &allow_partial, "If true, produce output even "
-                "if end state was not reached.")
+                "if end state was not reached.");
     po.Register("num-threads", &num_threads, "Number of actively processing "
                 "threads to run in parallel.");
     po.Register("word-symbol-table", &word_syms_filename, "Symbol table for "
@@ -108,9 +110,9 @@ int main(int argc, char *argv[]) {
     int32 num_max_chunks = 512;
     int32 num_max_utts = 10;
     po.Register("num-max-chunks", &num_max_chunks, "The maximum number of "
-                "chunks in GPU memory.")
+                "chunks in GPU memory.");
     po.Register("num-max-utts", &num_max_utts, "The maximum number of "
-                "utterances is processing in BatchComputer.")
+                "utterances is processing in BatchComputer.");
 
     po.Read(argc, argv);
 
@@ -151,13 +153,7 @@ int main(int argc, char *argv[]) {
     // Read in the transition model
     TransitionModel trans_model;
     ReadKaldiObject(trans_model_in_filename, &trans_model);
-
-    // Read in the ivector for Nnet inference
-    RandomAccessBaseFloatMatrixReader online_ivector_reader(
-        online_ivector_rspecifier);
-    RandomAccessBaseFloatVectorReaderMapped ivector_reader(
-        ivector_rspecifier, utt2spk_rspecifier);
-
+    
     // Lattice part
     bool determinize = config.determinize_lattice;
     CompactLatticeWriter compact_lattice_writer;
@@ -199,8 +195,9 @@ int main(int argc, char *argv[]) {
     // Initalize Controller
     Controller controller(opts, nnet, priors, online_ivector_period,
                           ensure_exact_final_context, minibatch_size,
-                          feature_reader, online_ivector_reader,
-                          ivector_reader, num_threads, decode_fst_cuda,
+                          feature_rspecifier, online_ivector_rspecifier,
+                          ivector_rspecifier, utt2spk_rspecifier,
+                          decode_fst_cuda, num_threads,
                           config, trans_model, word_syms,
                           config.acoustic_scale, determinize, allow_partial,
                           &alignment_writer, &words_writer,

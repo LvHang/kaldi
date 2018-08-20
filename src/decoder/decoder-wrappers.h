@@ -351,7 +351,7 @@ class DecodeUtteranceLatticeClassCuda : public MultiThreadable {
   // NOTE: we "take ownership" of "decoder" and "decodable".  These
   // are deleted by the destructor.  On error, "num_err" is incremented.
   DecodeUtteranceLatticeClassCuda(
-    CudaFst &decode_fst_cuda,
+    const CudaFst &decode_fst_cuda,
     CudaLatticeDecoderConfig &config,
     const TransitionModel &trans_model,
     const fst::SymbolTable *word_syms,
@@ -378,9 +378,9 @@ class DecodeUtteranceLatticeClassCuda : public MultiThreadable {
     );
 
   void operator () (); // The decoding happens here.
-  ~DecodeUtteranceLatticeClassCuda(); // Output happens here
+  ~DecodeUtteranceLatticeClassCuda() {} // Output happens here
  private:
-  CudaFst &decode_fst_cuda_;
+  const CudaFst &decode_fst_cuda_;
   CudaLatticeDecoderConfig &config_;
 
   const TransitionModel &trans_model_;

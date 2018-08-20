@@ -401,6 +401,21 @@ struct CompareByValue {
   }
 };
 
+struct IntPairHasher {
+  size_t operator() (const std::pair<int32, int32> a) const noexcept {
+    return std::hash<int32>()(a.first) +
+           std::hash<int32>()(a.second);
+  }
+};
+
+struct IntPairEqual {
+ public:
+  bool operator() (const std::pair<int32, int32> a,
+                   const std::pair<int32, int32> b) const {
+    return a.first == b.first && a.second == b.second;
+  }
+};
+
 class BatchComputer {
  public:
   /**
@@ -461,11 +476,17 @@ class BatchComputer {
   // If 'flush == false', it would ensure that a batch was ready.
   void Compute(
     bool flush,
-    std::unordered_map<std::string, std::queue<CuMatrix<BaseFloat>*> > *result,
+    std::unordered_map<std::string,
+                       std::queue<const CuMatrix<BaseFloat>*> > *result,
     std::unordered_map<std::string, bool> *is_end,
     std::unordered_map<std::string, Semaphore> *utts_semaphores);
 
-  int32 GetBatchSize() { return minibatch_size_; }
+  // called from AcceptInput() or Compute(). Prepare the batch_info_ which
+  // will be used to compute.
+  bool PrepareBatchInfo(
+    const std::unordered_map<std::string, size_t> &finished_dec_utts);
+
+  const int32 GetBatchSize() const { return minibatch_size_; }
 
  private:
   KALDI_DISALLOW_COPY_AND_ASSIGN(BatchComputer);
@@ -499,14 +520,16 @@ class BatchComputer {
   // According to the information in batch_info_, prepare the 'batch' data,
   // ComputationRequest, compute and get the results out.
   void DoNnetComputation(
-    std::unordered_map<std::string, std::queue<CuMatrix<BaseFloat>*> > *result,
+    std::unordered_map<std::string,
+                       std::queue<const CuMatrix<BaseFloat>*> > *result,
     std::unordered_map<std::string, bool> *is_end,
     std::unordered_map<std::string, Semaphore> *utts_semaphores);
   // If ensure_exact_final_context is true, this function is used to deal with
   // "shorter than chunk size" utterances. In this function, we have to build
   // a new CompuationRequest.
   void DoNnetComputationOnes(
-    std::unordered_map<std::string, std::queue<CuMatrix<BaseFloat>*> > *result,
+    std::unordered_map<std::string,
+                       std::queue<const CuMatrix<BaseFloat>*> > *result,
     std::unordered_map<std::string, bool> *is_end,
     std::unordered_map<std::string, Semaphore> *utts_semaphores);
 
@@ -527,11 +550,6 @@ class BatchComputer {
   void CheckInput(const Matrix<BaseFloat> *feats,
                   const Vector<BaseFloat> *ivector = NULL,
                   const Matrix<BaseFloat> *online_ivectors = NULL);
-
-  // called from AcceptInput() or Compute(). Prepare the batch_info_ which
-  // will be used to compute.
-  bool PrepareBatchInfo(
-    const std::unordered_map<std::string, size_t> &finished_dec_utts);
 
   // called from constructor. According to (tot_left_context,tot_right_context),
   // which equals to the model left/right context plus the extra left/right
@@ -630,33 +648,33 @@ class BatchComputer {
 };
 
 
-Class BatchComputerClass : public MultiThreadable {
+class BatchComputerClass : public MultiThreadable {
  public:
   BatchComputerClass(
-    const BatchComputer& batch_computer,
+    BatchComputer* batch_computer,
     int32 num_max_chunks,
     int32 *chunk_counter,
     std::unordered_map<std::string,
-      std::queue<CuMatrix<BaseFloat>* > > *finished_inf_utts,
+      std::queue<const CuMatrix<BaseFloat>* > > *finished_inf_utts,
     const std::unordered_map<std::string, size_t> &finished_dec_utts,
     std::unordered_map<std::string, bool> *is_end,
     std::unordered_map<std::string, Semaphore> *utts_semaphores,
     WaitingUtterancesRepository *repository,
-    Mutex *utt_mutex);
+    std::mutex *utt_mutex);
   void operator () (); // The batch computing happens here
   ~BatchComputerClass() {}
  private:
-  BatchComputer& batch_computer_;
+  BatchComputer* batch_computer_;
   int32 num_max_chunks_;
   int32 *chunk_counter_;
   // This is the warehouse of log-likelihood. The results in it will be
   // accessed by decoder.
   std::unordered_map<std::string,
-    std::queue<CuMatrix<BaseFloat>* > > *finished_inf_utts_;
+    std::queue<const CuMatrix<BaseFloat>* > > *finished_inf_utts_;
   // It will be passed to function PrepareBatchInfo() of class BatchComputer to
   // help BatchComputer figure out which things are most convenient to compute
   // first.
-  std::unordered_map<std::string, size_t> &finished_dec_utts_;
+  const std::unordered_map<std::string, size_t> &finished_dec_utts_;
   // use to record if an utterance has been finished.
   std::unordered_map<std::string, bool> *is_end_;
   // When a new chunk is generated, the corresponding semaphore will be signal.
@@ -664,7 +682,7 @@ Class BatchComputerClass : public MultiThreadable {
   WaitingUtterancesRepository *repository_;
   // protect the process of PrepareBatchInfo(). In this procedure, "finished_
   // dec_utts_" will not be changed.
-  Mutex *utt_mutex_;
+  std::mutex *utt_mutex_;
 };
 
 } // namespace nnet3

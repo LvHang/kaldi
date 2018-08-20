@@ -14,12 +14,12 @@ LIBNAME = kaldi-decoder
 ADDLIBS = ../lat/kaldi-lat.a ../hmm/kaldi-hmm.a \
           ../transform/kaldi-transform.a ../gmm/kaldi-gmm.a \
           ../tree/kaldi-tree.a ../util/kaldi-util.a \
-          ../matrix/kaldi-matrix.a ../base/kaldi-base.a
+          ../matrix/kaldi-matrix.a ../base/kaldi-base.a ../nnet3/kaldi-nnet3.a
 
 # for GPU-bsed WFST decoder
 ifeq ($(BUILD_CUDA_DECODER), true)
 OBJFILES += cuda-decoder-utils.o cuda-lattice-decoder.o \
-            lattice-faster-decoder-cuda.o cuda-decoder.o 
+            lattice-faster-decoder-cuda.o cuda-decoder.o decoder-controller.o
 LDLIBS += $(CUDA_LDLIBS)
 LDFLAGS += $(CUDA_LDFLAGS)
 ADDLIBS += ../cudamatrix/kaldi-cudamatrix.a

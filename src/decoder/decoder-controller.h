@@ -33,6 +33,7 @@
 #endif
 
 namespace kaldi {
+namespace nnet3 {
  
 /** This class is used in parallel gpu decoding stuff. For this stuff, both
     neural network forwarding and generating lattices are processed in GPU.
@@ -53,16 +54,18 @@ class Controller {
   // The first half is used in the part of batch computing. The second half is
   // used in the part of generating lattices.
   Controller(
-    const NnetSimpleComputations &opts,
+    const NnetSimpleComputationOptions &opts,
     const Nnet &nnet,
     const VectorBase<BaseFloat> &priors,
     int32 online_ivector_period,
     bool ensure_exact_final_context,
     int32 minibatch_size,
-    const SequentialBaseFloatMatrixReader &feature_reader,
-    const RandomAccessBaseFloatMatrixReader &online_ivector_reader,
-    const RandomAccessBaseFloatVectorReaderMapped &ivector_reader,
+    std::string feature_rspecifier,
+    std::string online_ivector_rspecifier,
+    std::string ivector_rspecifier,
+    std::string utt2spk_rspecifier,
     CudaFst &decode_fst_cuda,
+    int32 number_threads,
     CudaLatticeDecoderConfig &config,
     const TransitionModel &trans_model,
     const fst::SymbolTable *word_syms,
@@ -77,7 +80,9 @@ class Controller {
     int64 *frame_sum, // on success, adds #frames to this.
     int32 *num_done, // on success (including partial decode), increments this.
     int32 *num_err,  // on failure, increments this.
-    int32 *num_partial // If partial decode(final-state not reached),increment.
+    int32 *num_partial, // If partial decode(final-state not reached),increment.
+    int32 num_max_chunks,
+    int32 num_max_utts
     );  
 
   // The main function. 
@@ -102,15 +107,17 @@ class Controller {
   bool ensure_exact_final_context_;
   // The capacity of the minibatch.
   int32 minibatch_size_;
-  const SequentialBaseFloatMatrixReader &feature_reader_;
-  const RandomAccessBaseFloatMatrixReader &online_ivector_reader_;
-  const RandomAccessBaseFloatVectorReaderMapped &ivector_reader_;
+  const std::string feature_rspecifier_;
+  const std::string online_ivector_rspecifier_;
+  const std::string ivector_rspecifier_;
+  const std::string utt2spk_rspecifier_;
   BatchComputer* batch_computer_; // ownership of the pointer
   
   // Some variables for Decoder. It will be used to initialize
   // class DecodeUtteranceLatticeClassCuda, in which LatticeFasterDecoderCuda
   // is used to decode.
   const CudaFst &decode_fst_cuda_;
+  int32 num_threads_;  // The number of decoding threads
   CudaLatticeDecoderConfig &config_;
   const TransitionModel &trans_model_;
   const fst::SymbolTable *word_syms_;
@@ -119,8 +126,8 @@ class Controller {
   bool allow_partial_;
   Int32VectorWriter *alignments_writer_;
   Int32VectorWriter *words_writer_;
-  CompactLatticeWriter *compace_lattice_writer_;
-  LatticeWriter *lattice_writer;
+  CompactLatticeWriter *compact_lattice_writer_;
+  LatticeWriter *lattice_writer_;
   double *like_sum_;
   int64 *frame_sum_;
   int32 *num_done_;
@@ -129,7 +136,7 @@ class Controller {
 
   // Some variables which are used to connect BatchComputer and Decoder
   // This part can be understand as a public territory.
-  Mutex *utt_mutex_;
+  std::mutex *utt_mutex_;
   WaitingUtterancesRepository *repository_;
 
   int32 num_max_chunks_; // The maximum number of chunks in GPU memory
@@ -137,7 +144,6 @@ class Controller {
                         // BatchComputer
   int32 chunk_counter_ = 0; // It is used to remember the number of chunks is
                             // available now
-  int32 num_threads_;  // The number of decoding threads
 
   // The key is utt_id. The value is a queue which contains all the pointers
   // to each posterior chunk. In BatchComputer, we will new the "CuMatrix"
@@ -153,6 +159,7 @@ class Controller {
   unordered_map<std::string, Semaphore> utts_semaphores_; 
 };
 
+} // end namespace nnet3
 } // end namespace kaldi
 
 #endif

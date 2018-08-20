@@ -817,7 +817,7 @@ void AlignUtteranceWrapper(
 
 
 DecodeUtteranceLatticeClassCuda::DecodeUtteranceLatticeClassCuda(
-  CudaFst &decode_fst_cuda,
+  const CudaFst &decode_fst_cuda,
   CudaLatticeDecoderConfig &config,
   const TransitionModel &trans_model,
   const fst::SymbolTable *word_syms,
