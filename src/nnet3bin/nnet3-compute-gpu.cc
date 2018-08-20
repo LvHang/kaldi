@@ -58,7 +58,6 @@ int main(int argc, char *argv[]) {
     NnetSimpleComputationOptions opts;
     opts.acoustic_scale = 1.0;  // by default do no scaling in this recipe.
 
-    bool apply_exp = false, use_priors = true;
     std::string use_gpu = "yes";
 
     std::string ivector_rspecifier,
@@ -81,13 +80,8 @@ int main(int argc, char *argv[]) {
     po.Register("online-ivector-period", &online_ivector_period, "Number of "
                 "frames between iVectors in matrices supplied to the "
                 "--online-ivectors option");
-    po.Register("apply-exp", &apply_exp, "If true, apply exp function to "
-                "output");
     po.Register("use-gpu", &use_gpu,
                 "yes|no|optional|wait, only has effect if compiled with CUDA");
-    po.Register("use-priors", &use_priors, "If true, subtract the logs of the "
-                "priors stored with the model (in this case, "
-                "a .mdl file is expected as input).");
     po.Register("minibatch-size", &minibatch_size, "Specify the number of "
                 "utterances to be process in parallel.");
     po.Register("ensure-exact-final-context", &ensure_exact_final_context, "It "
@@ -96,6 +90,7 @@ int main(int argc, char *argv[]) {
 
     // The following is decoder options
     CudaLatticeDecoderConfig config;
+    config.Register(&po);
     bool allow_partial = false;
     int32 num_threads = 1;
     std::string word_syms_filename;
@@ -116,44 +111,35 @@ int main(int argc, char *argv[]) {
 
     po.Read(argc, argv);
 
-    if (po.NumArgs() < 5 || po.NumArgs() > 7) {
+    if (po.NumArgs() < 4 || po.NumArgs() > 6) {
       po.PrintUsage();
       exit(1);
     }
 
     std::string nnet_rxfilename = po.GetArg(1),
-                trans_model_in_filename = po.GetArg(2),
-                fst_in_str = po.GetArg(3),
-                feature_rspecifier = po.GetArg(4),
-                lattice_wspecifier = po.GetArg(5),
-                words_wspecifier = po.GetOptArg(6),
-                alignment_wspecifier = po.GetOptArg(7);
+                fst_in_str = po.GetArg(2),
+                feature_rspecifier = po.GetArg(3),
+                lattice_wspecifier = po.GetArg(4),
+                words_wspecifier = po.GetOptArg(5),
+                alignment_wspecifier = po.GetOptArg(6);
 
     // Read in the neural network
-    Nnet raw_nnet;
     AmNnetSimple am_nnet;
-    if (use_priors) {
-      bool binary;
-      TransitionModel trans_model;
-      Input ki(nnet_rxfilename, &binary);
-      trans_model.Read(ki.Stream(), binary);
-      am_nnet.Read(ki.Stream(), binary);
-    } else {
-      ReadKaldiObject(nnet_rxfilename, &raw_nnet);
-    }
-    Nnet &nnet = (use_priors ? am_nnet.GetNnet() : raw_nnet);
+    bool binary;
+    TransitionModel trans_model;
+    
+    Input ki(nnet_rxfilename, &binary);
+    trans_model.Read(ki.Stream(), binary);
+    am_nnet.Read(ki.Stream(), binary);
+    Nnet &nnet = am_nnet.GetNnet();
+
     SetBatchnormTestMode(true, &nnet);
     SetDropoutTestMode(true, &nnet);
     CollapseModel(CollapseModelConfig(), &nnet);
 
     Vector<BaseFloat> priors;
-    if (use_priors)
-      priors = am_nnet.Priors();
-
-    // Read in the transition model
-    TransitionModel trans_model;
-    ReadKaldiObject(trans_model_in_filename, &trans_model);
-    
+    priors = am_nnet.Priors();
+   
     // Lattice part
     bool determinize = config.determinize_lattice;
     CompactLatticeWriter compact_lattice_writer;
