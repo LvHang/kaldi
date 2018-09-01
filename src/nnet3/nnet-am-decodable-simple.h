@@ -479,14 +479,17 @@ class BatchComputer {
     std::unordered_map<std::string,
                        std::queue<const CuMatrix<BaseFloat>*> > *result,
     std::unordered_map<std::string, bool> *is_end,
-    std::unordered_map<std::string, Semaphore> *utts_semaphores);
+    std::unordered_map<std::string, Semaphore* > *utts_semaphores);
 
   // called from AcceptInput() or Compute(). Prepare the batch_info_ which
   // will be used to compute.
   bool PrepareBatchInfo(
-    const std::unordered_map<std::string, size_t> &finished_dec_utts);
+    const std::unordered_map<std::string, size_t> finished_dec_utts);
 
-  const int32 GetBatchSize() const { return minibatch_size_; }
+  inline int32 GetBatchSize() const { return minibatch_size_; }
+
+  // This function is used to finialize the BatchComputerClass thread.
+  inline bool Done() const { return utt_list_.empty(); }
 
  private:
   KALDI_DISALLOW_COPY_AND_ASSIGN(BatchComputer);
@@ -523,7 +526,7 @@ class BatchComputer {
     std::unordered_map<std::string,
                        std::queue<const CuMatrix<BaseFloat>*> > *result,
     std::unordered_map<std::string, bool> *is_end,
-    std::unordered_map<std::string, Semaphore> *utts_semaphores);
+    std::unordered_map<std::string, Semaphore* > *utts_semaphores);
   // If ensure_exact_final_context is true, this function is used to deal with
   // "shorter than chunk size" utterances. In this function, we have to build
   // a new CompuationRequest.
@@ -531,7 +534,7 @@ class BatchComputer {
     std::unordered_map<std::string,
                        std::queue<const CuMatrix<BaseFloat>*> > *result,
     std::unordered_map<std::string, bool> *is_end,
-    std::unordered_map<std::string, Semaphore> *utts_semaphores);
+    std::unordered_map<std::string, Semaphore* > *utts_semaphores);
 
   // Gets the iVector that will be used for this chunk of frames, if we are
   // using iVectors (else does nothing).  note: the num_output_frames is
@@ -603,6 +606,10 @@ class BatchComputer {
   // in function PrepareBatchInfo(). It helps the function PrepareBatchInfo()
   // to figure out which things are most convenient to compute first. 
   std::unordered_map<std::string, size_t> prepared_chunk_record_;
+  
+  // This member is used in PrepareBatchInfo(). Compare with the input argument
+  // "finished_dec_utts", we know how many chunks were used during this period.
+  std::unordered_map<std::string, size_t> lasttime_finished_dec_utts_;
 
   // The meaning of the tuple is
   // (utt_id, first_input_frame_index, last_input_frame_index,
@@ -623,6 +630,23 @@ class BatchComputer {
   typedef std::unordered_map<std::pair<int32, int32>, BatchInfoQueue*,
                              IntPairHasher, IntPairEqual> BatchInfoMap;
   BatchInfoMap batch_info_;
+  
+  // In online decoding, we push each chunk posterior into corresponding
+  // queue. After that, the decoding thread will access each chunk in order.
+  // So we should make sure the order of chunks is right.
+  // The following structure is used to do that. 
+  // If the option "opts.extra_left_context_initial" is set,
+  // (-nnet_left_context - opts.extra_left_context_initial, nnet_right_context +
+  // opts.extra_right_context) will be the first entry. And then,
+  // (-nnet_left_context - opts.extra_left_context, nnet_right_context +
+  // opts.extra_right_context) will be the second entry. After that, if
+  // "opts.extra_right_context_finial" is set, (-nnet_left_context -
+  // opts.extra_left_context, nnet_right_context +
+  // opts.extra_right_context_finial) will be the third entry. At last, if
+  // "ensure_exact_final_context" is set, (-1, -1) will be the last.
+  // The structure is initialized in function PrepareComputationRequest();
+  typedef std::list<std::pair<int32, int32> > ContextOrderRecord;
+  ContextOrderRecord context_order_record_;
 
   // The key is (tot_left_context, tot_right_context), which would equal the
   // model left/right context plus the extra left/right context. The value is
@@ -652,34 +676,37 @@ class BatchComputerClass : public MultiThreadable {
  public:
   BatchComputerClass(
     BatchComputer* batch_computer,
-    int32 num_max_chunks,
-    int32 *chunk_counter,
     std::unordered_map<std::string,
       std::queue<const CuMatrix<BaseFloat>* > > *finished_inf_utts,
     const std::unordered_map<std::string, size_t> &finished_dec_utts,
     std::unordered_map<std::string, bool> *is_end,
-    std::unordered_map<std::string, Semaphore> *utts_semaphores,
+    std::unordered_map<std::string, Semaphore* > *utts_semaphores,
     WaitingUtterancesRepository *repository,
+    Semaphore *batch_compute_semaphore,
     std::mutex *utt_mutex);
   void operator () (); // The batch computing happens here
   ~BatchComputerClass() {}
  private:
   BatchComputer* batch_computer_;
-  int32 num_max_chunks_;
-  int32 *chunk_counter_;
+
   // This is the warehouse of log-likelihood. The results in it will be
   // accessed by decoder.
   std::unordered_map<std::string,
     std::queue<const CuMatrix<BaseFloat>* > > *finished_inf_utts_;
+  
   // It will be passed to function PrepareBatchInfo() of class BatchComputer to
   // help BatchComputer figure out which things are most convenient to compute
   // first.
   const std::unordered_map<std::string, size_t> &finished_dec_utts_;
+  
   // use to record if an utterance has been finished.
   std::unordered_map<std::string, bool> *is_end_;
+  
   // When a new chunk is generated, the corresponding semaphore will be signal.
-  std::unordered_map<std::string, Semaphore> *utts_semaphores_;
+  std::unordered_map<std::string, Semaphore* > *utts_semaphores_;
   WaitingUtterancesRepository *repository_;
+
+  Semaphore *batch_compute_semaphore_;
   // protect the process of PrepareBatchInfo(). In this procedure, "finished_
   // dec_utts_" will not be changed.
   std::mutex *utt_mutex_;

@@ -303,21 +303,21 @@ class WaitingUtterancesRepository {
   /// an example available it will provide it, or it will sleep till one is
   /// available.  It returns NULL when there are no utterances left and
   /// UtterancesDone() has been called.
-  std::string *ProvideUtterance() {
+  bool ProvideUtterance(std::string *ans) {
     full_semaphore_.Wait();
     if (done_) {
       KALDI_ASSERT(utts_.empty());
       full_semaphore_.Signal(); // Increment the semaphore so
       // the call by the next thread will not block.
-      return NULL; // no examples to return-- all finished.
+      return false; // no examples to return-- all finished.
     } else {
       utts_mutex_.lock();
       KALDI_ASSERT(!utts_.empty());
-      std::string *ans = &(utts_.front());
+      *ans = utts_.front();
       utts_.pop_front();
       utts_mutex_.unlock();
       empty_semaphore_.Signal();
-      return ans;
+      return true;
     }
   }
 
@@ -374,7 +374,10 @@ class DecodeUtteranceLatticeClassCuda : public MultiThreadable {
       std::queue<const CuMatrix<BaseFloat>* > > *finished_inf_utts,
     unordered_map<std::string, size_t> *finished_dec_utts,
     const unordered_map<std::string, bool> &is_end,
-    unordered_map<std::string, Semaphore> *utts_semaphores
+    unordered_map<std::string, Semaphore* > *utts_semaphores, // the ownership
+    int32 *chunk_counter,
+    int32 batch_size,
+    Semaphore *batch_compute_semaphore
     );
 
   void operator () (); // The decoding happens here.
@@ -416,8 +419,12 @@ class DecodeUtteranceLatticeClassCuda : public MultiThreadable {
   unordered_map<std::string, size_t> *finished_dec_utts_;
   const unordered_map<std::string, bool> &is_end_;
   // help decoding thread judge whether any chunk is available.
-  unordered_map<std::string, Semaphore> *utts_semaphores_;
-
+  unordered_map<std::string, Semaphore* > *utts_semaphores_;
+  
+  // All the threads share this chunk_counter and semaphore.
+  int32 *chunk_counter_;
+  int32 batch_size_;
+  Semaphore *batch_compute_semaphore_;
 };
 
 } // end namespace kaldi.

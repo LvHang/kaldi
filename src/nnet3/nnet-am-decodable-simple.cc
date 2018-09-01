@@ -433,6 +433,7 @@ void BatchComputer::PrepareComputationRequest() {
   context = std::make_pair(opts_.extra_left_context + nnet_left_context_,
                            opts_.extra_right_context + nnet_right_context_);
   batch_info_[context] = new BatchInfoQueue();
+  context_order_record_.push_back(context);
 
   if (opts_.extra_left_context_initial != opts_.extra_left_context &&
       opts_.extra_left_context_initial >= 0) {
@@ -440,6 +441,7 @@ void BatchComputer::PrepareComputationRequest() {
                              nnet_left_context_,
                              opts_.extra_right_context + nnet_right_context_);
     batch_info_[context] = new BatchInfoQueue();
+    context_order_record_.push_front(context);
   }
 
   if (opts_.extra_right_context_final != opts_.extra_right_context &&
@@ -448,6 +450,7 @@ void BatchComputer::PrepareComputationRequest() {
                              opts_.extra_right_context_final +
                              nnet_right_context_);
     batch_info_[context] = new BatchInfoQueue();
+    context_order_record_.push_back(context);
   }
 
   for (BatchInfoMap::iterator iter =
@@ -497,6 +500,7 @@ void BatchComputer::PrepareComputationRequest() {
   if (ensure_exact_final_context_) {
     context = std::make_pair(-1, -1);
     batch_info_[context] = new BatchInfoQueue();
+    context_order_record_.push_back(context);
   }
 }
 
@@ -526,6 +530,7 @@ void BatchComputer::AcceptInput(
 
   num_subsampled_frames_[utt_id] = cur_num_subsampled_frames;
   prepared_chunk_record_[utt_id] = 0;
+  lasttime_finished_dec_utts_[utt_id] = 0;
   num_chunks_[utt_id] = ceil(feats->NumRows() * 1.0 /
                              opts_.frames_per_chunk);
 }
@@ -561,7 +566,7 @@ void BatchComputer::DoNnetComputationOnes(
   std::unordered_map<std::string,
                      std::queue<const CuMatrix<BaseFloat>*> > *result,
   std::unordered_map<std::string, bool> *is_end,
-  std::unordered_map<std::string, Semaphore> *utts_semaphores) {
+  std::unordered_map<std::string, Semaphore* > *utts_semaphores) {
   std::pair<int32, int32> current_context(-1, -1);
   if (batch_info_[current_context]->size() == 0) {
     return;
@@ -647,6 +652,7 @@ void BatchComputer::DoNnetComputationOnes(
         dest.CopyFromVec(src);
       }
     }
+    std::cout << "input matrix finished Ones" << std::endl;
     // Update ivector matrix
     // If the nnet_ doesn't have ivector, nothing will be returned by
     // GetCurrentIvector. So the ivector.Dim() == 0, and the tot_ivector will
@@ -660,6 +666,7 @@ void BatchComputer::DoNnetComputationOnes(
                       last_output_frame - first_output_frame, &ivector);
     if (ivector.Dim() != 0) {
       tot_ivector.Row(n).CopyFromVec(ivector);
+      std::cout << "ivector matrix finished Ones" << std::endl;
     }
     input_count += num_input_frames;
   }
@@ -699,13 +706,15 @@ void BatchComputer::DoNnetComputationOnes(
     output->CopyFromMat(cu_output.RowRange(output_count, num_rows));
     // Add the result
     (*result)[utt_id].push(output);
-    (*utts_semaphores)[utt_id].Signal();
+    (*utts_semaphores)[utt_id]->Signal();
     output_count += num_rows;
     // Set end symbol
     if ((last_subsampled_frame + 1) ==
          num_subsampled_frames_.find(utt_id)->second) {
       is_end->find(utt_id)->second = true;
       is_computed_.find(utt_id)->second = true;
+      // This utterance has been finished. Clear it.
+      Clear(utt_id);
     }
   }
   // Clear
@@ -727,13 +736,13 @@ void BatchComputer::DoNnetComputation(
   std::unordered_map<std::string,
                      std::queue<const CuMatrix<BaseFloat>*> > *result,
   std::unordered_map<std::string, bool> *is_end,
-  std::unordered_map<std::string, Semaphore> *utts_semaphores) {
+  std::unordered_map<std::string, Semaphore*> *utts_semaphores) {
   int32 ivector_dim = nnet_.InputDim("ivector");
-  // Use the index of context_to_request_ to do loop
-  ComputationRequestMap::iterator iter;
-  for (iter = context_to_request_.begin(); iter != context_to_request_.end();
-       iter++) {
-    std::pair<int32, int32> current_context = iter->first;
+  // According to the context_order_record_, we do the loop.
+  ContextOrderRecord::iterator iter;
+  for (iter = context_order_record_.begin();
+       iter != context_order_record_.end(); iter++) {
+    std::pair<int32, int32> current_context = *iter;
     if (batch_info_[current_context]->size() == 0) {
       break;
     }
@@ -760,6 +769,9 @@ void BatchComputer::DoNnetComputation(
                first_input_frame, last_input_frame,
                first_subsampled_frame, last_subsampled_frame,
                output_offset) = *iter;
+      std::cout << utt_id << " " << first_input_frame << " "
+                << last_input_frame << " " << first_subsampled_frame << " "
+                << last_subsampled_frame << " " << output_offset << std::endl;
 
       std::unordered_map<std::string, const Matrix<BaseFloat>* >::iterator
         feats_iter;
@@ -803,6 +815,10 @@ void BatchComputer::DoNnetComputation(
     NnetComputer computer(opts_.compute_config, *computation,
                           nnet_, nnet_to_update);
     CuMatrix<BaseFloat> input_feats_cu(tot_input);
+    std::cout << "Input matrix is " << input_feats_cu.NumRows() << "*" 
+                                    << input_feats_cu.NumCols() << std::endl;
+    std::cout << "Ivector matrix is " << tot_ivector.NumRows() << "*"
+                                      << tot_ivector.NumCols() << std::endl; 
     computer.AcceptInput("input", &input_feats_cu);
     CuMatrix<BaseFloat> ivector_feats_cu;
     // tot_ivector.NumCols() == 0 means that nnet_ doesn't have ivector
@@ -811,7 +827,9 @@ void BatchComputer::DoNnetComputation(
       ivector_feats_cu.CopyFromMat(tot_ivector);
       computer.AcceptInput("ivector", &ivector_feats_cu);
     }
+    std::cout << "before computer.run()" << std::endl;
     computer.Run();
+    std::cout << "after computer.run()" << std::endl;
     CuMatrix<BaseFloat> cu_output;
     computer.GetOutputDestructive("output", &cu_output);
     // Get Output
@@ -833,13 +851,15 @@ void BatchComputer::DoNnetComputation(
                                                             output_dim_);
       output->CopyFromMat(cu_output.RowRange(
               n * num_batch_output_rows + output_offset, num_rows));
-      (*utts_semaphores)[utt_id].Signal();
+      (*utts_semaphores)[utt_id]->Signal();
       // Add the result
       (*result)[utt_id].push(output);
       if ((last_subsampled_frame + 1) ==
            num_subsampled_frames_.find(utt_id)->second) {
         is_computed_.find(utt_id)->second = true;
         is_end->find(utt_id)->second = true;
+        // This utterance has been finished. Clear it.
+        Clear(utt_id);
       }
     }
     // Clear
@@ -898,8 +918,11 @@ void BatchComputer::Clear(std::string utt_id) {
     online_ivector_feats_.erase(utt_id);
   }
   num_subsampled_frames_.erase(utt_id);
+  num_chunks_.erase(utt_id);
   utt_list_.remove(utt_id);
   is_computed_.erase(utt_id);
+  prepared_chunk_record_.erase(utt_id);
+  lasttime_finished_dec_utts_.erase(utt_id);
 }
 
 
@@ -908,7 +931,7 @@ void BatchComputer::Compute(
   std::unordered_map<std::string, 
                      std::queue<const CuMatrix<BaseFloat>*> > *result,
   std::unordered_map<std::string, bool> *is_end,
-  std::unordered_map<std::string, Semaphore> *utts_semaphores) {
+  std::unordered_map<std::string, Semaphore* > *utts_semaphores) {
   if (flush) {
     if (!Empty()) {
       if (ensure_exact_final_context_) {
@@ -942,11 +965,9 @@ BatchComputer::~BatchComputer() {
 
 
 bool BatchComputer::PrepareBatchInfo(
-  const std::unordered_map<std::string, size_t> &finished_dec_utts) {
+  const std::unordered_map<std::string, size_t> finished_dec_utts) {
 
-  bool flush = true;
-  KALDI_ASSERT(finished_dec_utts.size() == num_subsampled_frames_.size());
-  KALDI_ASSERT(finished_dec_utts.size() == num_chunks_.size());
+  bool flush = false;
 
   std::vector<std::pair<std::string, int32> > used_chunks;
   std::unordered_map<std::string, int32> remaining_chunks;
@@ -958,9 +979,9 @@ bool BatchComputer::PrepareBatchInfo(
        it++) {
     std::string cur_utt_id = it->first;
     int32 cur_used_chunks = finished_dec_utts.at(cur_utt_id) -
-                            prepared_chunk_record_[cur_utt_id];
-    int32 cur_remaining_chunks = num_chunks_[cur_utt_id] -
-                                 finished_dec_utts.at(cur_utt_id);
+                            lasttime_finished_dec_utts_.at(cur_utt_id);
+    int32 cur_remaining_chunks = num_chunks_.at(cur_utt_id) -
+                                 prepared_chunk_record_.at(cur_utt_id);
     tot_used_chunks += cur_used_chunks;
     tot_remaining_chunks += cur_remaining_chunks;
 
@@ -971,51 +992,55 @@ bool BatchComputer::PrepareBatchInfo(
 
 
   std::unordered_map<std::string, int32> this_turn_chunks;
-  if (tot_remaining_chunks < GetBatchSize()) {
-    flush = false;
-    this_turn_chunks = remaining_chunks;
-  }
-  
-  // used_chunks will be used to compute the scale, so increment zero.
-  for (std::vector<std::pair<std::string, int32> >::iterator it =
-       used_chunks.begin(); it != used_chunks.end(); it++) {
-    if (it->second == 0) {
-      it->second += 1;
-      tot_used_chunks += 1;
-    }
-  }
-  // sort from big to small
-  std::sort(used_chunks.begin(), used_chunks.end(), CompareByValue());
-  
-  std::vector<std::pair<std::string, BaseFloat> > weights;
-  for (std::vector<std::pair<std::string, int32> >::iterator it =
-       used_chunks.begin(); it != used_chunks.end(); it++) {
-    weights.push_back(std::make_pair(
-      it->first, it->second * 1.0 / tot_used_chunks));
-  }
- 
-  int32 counter = GetBatchSize();
-  int32 rest = 0;
-  for (std::vector<std::pair<std::string, BaseFloat> >::iterator it =
-       weights.begin(); it != weights.end(); it++) {
-    int32 num_expect = ceil(GetBatchSize() * it->second);
-    int32 num_real = 0;
-    // As we always use ceil(), so the last few values may bigger than counter
-    if (num_expect > counter) num_expect = counter;
 
-    if ((num_expect + rest) > remaining_chunks[it->first]) {
-      num_real = remaining_chunks[it->first];
-      rest = num_expect + rest - num_real;
-    } else {
-      num_real = num_expect + rest;
-      rest = 0;
+  if (tot_remaining_chunks < GetBatchSize()) {
+    flush = true;
+    this_turn_chunks = remaining_chunks;
+  } else { // we will fill the batch to the full.
+    // used_chunks will be used to compute the scale, so increment zero.
+    for (std::vector<std::pair<std::string, int32> >::iterator it =
+         used_chunks.begin(); it != used_chunks.end(); it++) {
+      if (it->second == 0) {
+        it->second += 1;
+        tot_used_chunks += 1;
+      }
     }
-    counter -= num_real;
-    this_turn_chunks[it->first] = num_real;
+    // sort from big to small
+    std::sort(used_chunks.begin(), used_chunks.end(), CompareByValue());
+  
+    // if tot_used_chunks > minibatch_size, scale used_chunks to minibatch_size
+    // Form here, used_chunks should be regared as a kind of weight
+    if (tot_used_chunks > GetBatchSize()) {
+      for (std::vector<std::pair<std::string, int32> >::iterator it =
+           used_chunks.begin(); it != used_chunks.end(); it++) {
+        it->second = it->second * 128 / tot_used_chunks;
+      }
+    }
+
+    int32 counter = GetBatchSize();
+    while (counter > 0) {
+      for (std::vector<std::pair<std::string, int32> >::iterator it =
+          used_chunks.begin(); it != used_chunks.end() && counter > 0; it++) {
+        // Get the minimum value of used_chunks[utt_id], counter and
+        // remaining_chunks[utt_id]
+        int32 cur_num_chunks = it->second < counter ? it->second : counter;
+        if (remaining_chunks[it->first] < cur_num_chunks) {
+          cur_num_chunks = remaining_chunks[it->first];
+        }
+        // update
+        remaining_chunks[it->first] -= cur_num_chunks;
+        counter -= cur_num_chunks;
+        if (this_turn_chunks.find(it->first) != this_turn_chunks.end()) {
+          this_turn_chunks[it->first] += cur_num_chunks;
+        } else {
+          this_turn_chunks[it->first] = cur_num_chunks;
+        }
+      }
+    }
   }
- 
-  // Update prepared_chunk_record_
-  prepared_chunk_record_ = finished_dec_utts;
+  
+  // Update
+  lasttime_finished_dec_utts_ = finished_dec_utts;
 
   for (std::unordered_map<std::string, int32>::iterator it =
        this_turn_chunks.begin(); it != this_turn_chunks.end(); it++) {
@@ -1086,37 +1111,59 @@ bool BatchComputer::PrepareBatchInfo(
           first_subsampled_frame, last_subsampled_frame, output_offset);
       (batch_info_[context])->push_back(batch_info);
     }
+    prepared_chunk_record_[utt_id] += it->second;
+  }
+  // Debug
+  for (BatchInfoMap::iterator it = batch_info_.begin(); it != batch_info_.end();
+       it++) {
+    std::cout << "Context is (" << (it->first).first << ", "
+              << (it->first).second << ")" << std::endl;
+    for (BatchInfoQueue::iterator it_q = (*it->second).begin();
+         it_q != (*it->second).end(); it_q++) {
+      std::string utt_id;
+      int32 input_begin, input_end, output_begin, output_end, offset;
+      std::tie(utt_id, input_begin, input_end, output_begin,
+               output_end, offset) = *it_q;
+      std::cout << utt_id << " " << input_begin << " " << input_end << " "
+                << output_begin << " " << output_end << " " << offset
+                << std::endl;
+    }
   }
   return flush;
 }
 
 BatchComputerClass::BatchComputerClass(
   BatchComputer* batch_computer,
-  int32 num_max_chunks,
-  int32 *chunk_counter,
   std::unordered_map<std::string,
     std::queue<const CuMatrix<BaseFloat>* > > *finished_inf_utts,
   const std::unordered_map<std::string, size_t> &finished_dec_utts,
   std::unordered_map<std::string, bool> *is_end,
-  std::unordered_map<std::string, Semaphore> *utts_semaphores,
+  std::unordered_map<std::string, Semaphore* > *utts_semaphores,
   WaitingUtterancesRepository *repository,
+  Semaphore *batch_compute_semaphore,
   std::mutex *utt_mutex) :
-  batch_computer_(batch_computer), num_max_chunks_(num_max_chunks),
-  chunk_counter_(chunk_counter), finished_inf_utts_(finished_inf_utts),
+  batch_computer_(batch_computer), finished_inf_utts_(finished_inf_utts),
   finished_dec_utts_(finished_dec_utts), is_end_(is_end),
   utts_semaphores_(utts_semaphores), repository_(repository),
+  batch_compute_semaphore_(batch_compute_semaphore),
   utt_mutex_(utt_mutex) {}
 
 void BatchComputerClass::operator () () {
-  while (!repository_->Done()) {
-    if (num_max_chunks_ - *chunk_counter_ > batch_computer_->GetBatchSize()) {
-      utt_mutex_->lock();
+  while (true) {
+    std::cout << thread_id_ << " batch 111" << std::endl;
+    batch_compute_semaphore_->Wait();
+    std::cout << thread_id_ << " batch 222" << std::endl;
+    if (!batch_computer_->Done()) {
+      std::cout << thread_id_ << " batch 333" << std::endl;
       bool flush = batch_computer_->PrepareBatchInfo(finished_dec_utts_);
-      utt_mutex_->unlock();
+      std::cout << thread_id_ << " batch 444" << std::endl;
       batch_computer_->Compute(flush, finished_inf_utts_, is_end_,
                                utts_semaphores_);
+    } else {
+      break;
     }
   }
+  batch_computer_->Compute(true, finished_inf_utts_, is_end_, utts_semaphores_);
 }
 
 } // namespace nnet3

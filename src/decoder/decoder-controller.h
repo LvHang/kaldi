@@ -92,6 +92,8 @@ class Controller {
   //     here, the WaitingUtterancesRepository is used to coordinate each part.
   void Run();
 
+  ~Controller();
+
  private:
   // Some variables for BatchComputer. For details, check the reference of
   // class BatchComputer.
@@ -142,21 +144,35 @@ class Controller {
   int32 num_max_chunks_; // The maximum number of chunks in GPU memory
   int32 num_max_utts_;  // The maximum number of utterances is processing in
                         // BatchComputer
-  int32 chunk_counter_ = 0; // It is used to remember the number of chunks is
-                            // available now
+  
+  // Work with minibatch_size_ and batch_compute_semaphore_. At the beginning,
+  // it equals num_max_chunks_. It is decreased in decoding threads when 
+  // chunk_counter_ >= minibatch_size_. At the same time, the 
+  // batch_compute_semaphore_ call Signal(). It is increased when any chunk
+  // is used.
+  int32 chunk_counter_;
 
   // The key is utt_id. The value is a queue which contains all the pointers
   // to each posterior chunk. In BatchComputer, we will new the "CuMatrix"
-  // space to store posterior chunk.
+  // space to store posterior chunk. When a chunk is used, the corresponding
+  // decoder thread release the heap space.
   unordered_map<std::string,
     std::queue<const CuMatrix<BaseFloat>* > > finished_inf_utts_;
 
   // record the number of chunk is processed for each utterance. It will be 
-  // pass to BatchComputer to show what point the decoders are at in
+  // passed to BatchComputer to show what point the decoders are at in
   // each utterance.
   unordered_map<std::string, size_t> finished_dec_utts_;
   unordered_map<std::string, bool> is_end_;
-  unordered_map<std::string, Semaphore> utts_semaphores_; 
+  // When one chunk is put into map "finished_inf_utts_", the corresponding 
+  // semaphore is increased. When the utterance is finished, it is relased
+  // by decoder thread.
+  unordered_map<std::string, Semaphore*> utts_semaphores_;
+
+  // This semaphore is used to inform the BatchComputer to do once compute.
+  // It is increased in decoding threads when we have enough space to contain 
+  // a batch data.
+  Semaphore batch_compute_semaphore_;
 };
 
 } // end namespace nnet3

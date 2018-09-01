@@ -70,7 +70,8 @@ Controller::Controller(
     like_sum_(like_sum), frame_sum_(frame_sum),
     num_done_(num_done), num_err_(num_err),
     num_partial_(num_partial), num_max_chunks_(num_max_chunks),
-    num_max_utts_(num_max_utts) { 
+    num_max_utts_(num_max_utts), chunk_counter_(num_max_chunks_) {
+  utt_mutex_ = new std::mutex();
   repository_ = new WaitingUtterancesRepository(num_max_utts_);
   // Build the batch_computer_, it will be used to accept input in
   // Controller::Run() and to do compute in a single thread which
@@ -87,13 +88,14 @@ void Controller::Run() {
       alignments_writer_, words_writer_, compact_lattice_writer_,
       lattice_writer_, like_sum_, frame_sum_, num_done_, num_err_,
       num_partial_, utt_mutex_, repository_, &finished_inf_utts_,
-      &finished_dec_utts_, is_end_, &utts_semaphores_);
+      &finished_dec_utts_, is_end_, &utts_semaphores_,
+      &chunk_counter_, minibatch_size_, &batch_compute_semaphore_);
   MultiThreader<DecodeUtteranceLatticeClassCuda> m(num_threads_, c);
 
   // Create one thread to do NnetCompute in batch version.
-  BatchComputerClass c1(batch_computer_, num_max_chunks_, &chunk_counter_, 
+  BatchComputerClass c1(batch_computer_,
       &finished_inf_utts_, finished_dec_utts_, &is_end_, &utts_semaphores_,
-      repository_, utt_mutex_);
+      repository_, &batch_compute_semaphore_, utt_mutex_);
   MultiThreader<BatchComputerClass> m1(1, c1);
   
   // Read in feature
@@ -104,7 +106,6 @@ void Controller::Run() {
         online_ivector_rspecifier_);
   RandomAccessBaseFloatVectorReaderMapped ivector_reader(
         ivector_rspecifier_, utt2spk_rspecifier_);
-
   for (; !feature_reader.Done(); feature_reader.Next()) {
     std::string utt = feature_reader.Key();
     // Note: the reference that Value() returns is only valid until call
@@ -134,11 +135,33 @@ void Controller::Run() {
           online_ivector_reader.Value(utt));
       }
     }
-    repository_->AcceptUtterance(utt);
+
+    // Initialize
     batch_computer_->AcceptInput(utt, features, ivector, online_ivectors);
+    std::cout << utt << std::endl;
+    repository_->AcceptUtterance(utt);
+
+    utt_mutex_->lock();
+    // initialize the information of a new utterance for the warehouse.
+    is_end_[utt] = false;
+    finished_dec_utts_[utt] = 0;
+    finished_inf_utts_[utt] = std::queue<const CuMatrix<BaseFloat>* >();
+    utts_semaphores_[utt] = new Semaphore(0);
+    utt_mutex_->unlock();
   }
+  // When the last utterance in the repository is provided to a decoder thread,
+  // this function is called. At that time, the decoders and batchcomputer are 
+  // still in service.
   repository_->UtterancesDone();
 }
+
+Controller::~Controller() {
+  // Release the heap space
+  delete utt_mutex_;
+  delete repository_;
+  delete batch_computer_;
+}
+
 
 } // end of namespace nnet3
 } // end of namespace kaldi
