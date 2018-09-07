@@ -293,7 +293,6 @@ bool DecodeUtteranceLatticeFasterCuda(
       return false;
     }
   }
-
   PUSH_RANGE("post_decoding", 0);
   Timer timer;
 
@@ -314,6 +313,71 @@ bool DecodeUtteranceLatticeFasterCuda(
   return true;
 }
 
+
+bool DecodeUtteranceLatticeFasterCudaChunkVersion(
+  LatticeFasterDecoderCuda &decoder, // not const but is really an input.
+  std::mutex *utt_mutex,  // The following part provides chunk information.
+  unordered_map<std::string,
+    std::queue<const CuMatrix<BaseFloat>* > > *finished_inf_utts,
+  unordered_map<std::string, size_t> *finished_dec_utts,
+  const unordered_map<std::string, bool> &is_end,
+  unordered_map<std::string, Semaphore* > *utts_semaphores, // the ownership
+  int32 *chunk_counter,
+  int32 batch_size,
+  Semaphore *batch_compute_semaphore,
+  const TransitionModel &trans_model,
+  const fst::SymbolTable *word_syms,
+  std::string utt,
+  double acoustic_scale,
+  bool determinize,
+  bool allow_partial,
+  Int32VectorWriter *alignment_writer,
+  Int32VectorWriter *words_writer,
+  CompactLatticeWriter *compact_lattice_writer,
+  LatticeWriter *lattice_writer,
+  double *like_ptr,
+  Lattice* olat) { // puts utterance's like in like_ptr on success.
+  using fst::VectorFst;
+
+  std::cout << "Decode 000" << std::endl;
+  if (!decoder.Decode(utt, utt_mutex, finished_inf_utts, finished_dec_utts,
+                      is_end, utts_semaphores, chunk_counter, batch_size,
+                      batch_compute_semaphore)) {
+    KALDI_WARN << "Failed to decode file " << utt;
+    return false;
+  }
+
+  std::cout << "Decode 111" << std::endl;
+  if (!decoder.ReachedFinal()) {
+    if (allow_partial) {
+      KALDI_WARN << "Outputting partial output for utterance " << utt
+                 << " since no final-state reached\n";
+    } else {
+      KALDI_WARN << "Not producing output for utterance " << utt
+                 << " since no final-state reached and "
+                 << "--allow-partial=false.\n";
+      return false;
+    }
+  }
+  PUSH_RANGE("post_decoding", 0);
+  Timer timer;
+
+  // Get lattice, and do determinization if requested.
+  PUSH_RANGE("get_lattice", 1);
+  Lattice& lat = *olat;
+  decoder.GetRawLattice(&lat);
+  if (lat.NumStates() == 0)
+    KALDI_WARN << "Unexpected problem getting lattice for utterance " << utt;
+  else fst::Connect(&lat);
+  POP_RANGE;
+
+  double t4 = timer.Elapsed();
+  KALDI_VLOG(1) << "post_decoding: " << t4;
+
+  POP_RANGE;
+
+  return true;
+}
 
 
 // GPU decoding interface of outputting lattice
@@ -863,7 +927,7 @@ DecodeUtteranceLatticeClassCuda::DecodeUtteranceLatticeClassCuda(
      batch_size_(batch_size),
      batch_compute_semaphore_(batch_compute_semaphore) {}
 
-
+/*
 void DecodeUtteranceLatticeClassCuda::operator () () {
   // Decoding and lattice determinization happens here.
   kaldi::int64 frame_count = 0;
@@ -885,7 +949,6 @@ void DecodeUtteranceLatticeClassCuda::operator () () {
     while (true)  {
       utt_mutex_->lock();
       if ( *chunk_counter_ > batch_size_) {
-        std::cout << thread_id_ << " thread " << utt_this_thread << " sign up " << std::endl;
         *chunk_counter_ -= batch_size_;
         batch_compute_semaphore_->Signal();
       }
@@ -894,16 +957,14 @@ void DecodeUtteranceLatticeClassCuda::operator () () {
       // check whether it is the end or not.
       if ( is_end_.at(utt_this_thread) &&
            finished_inf_utts_->at(utt_this_thread).empty() ) {
-        std::cout << thread_id_ << " thread 000" << std::endl;
         break;
       }
-      std::cout << thread_id_ << " thread 111" << std::endl;
+
       // check the chunk_counter_ and deal with batch_compute_semaphore_
       PUSH_RANGE("whole decoding", 0);
       PUSH_RANGE("before_decoding", 1);
       
       utts_semaphores_->find(utt_this_thread)->second->Wait();
-      std::cout << thread_id_ << " thread 222" << std::endl;
       // The space is created on heap. When loglikes is used, release it.
       const CuMatrix<BaseFloat>* loglikes =
         finished_inf_utts_->find(utt_this_thread)->second.front();
@@ -976,6 +1037,74 @@ void DecodeUtteranceLatticeClassCuda::operator () () {
   if (num_err_ != NULL) (*num_err_) += num_fail;
   utt_mutex_->unlock();
 }
+*/
 
+
+void DecodeUtteranceLatticeClassCuda::operator () () {
+  // Decoding and lattice determinization happens here.
+  kaldi::int64 frame_count = 0;
+  int num_success = 0, num_fail = 0;  
+  using fst::VectorFst;
+  double elapsed = 0, elapsed2= 0;
+  Timer timer;
+  double tot_like = 0;
+
+  LatticeFasterDecoderCuda decoder(decode_fst_cuda_, trans_model_, config_);
+
+  std::string utt_this_thread;
+
+  while (repository_->ProvideUtterance(&utt_this_thread)) {
+    std::cout << thread_id_ << " thread " << utt_this_thread << std::endl;
+    timer.Reset();
+    double like;
+    Lattice lat;
+    std::cout << "Thread 000" << std::endl;
+    if (DecodeUtteranceLatticeFasterCudaChunkVersion(
+          decoder,
+          utt_mutex_, finished_inf_utts_, finished_dec_utts_, is_end_,
+          utts_semaphores_, chunk_counter_, batch_size_,
+          batch_compute_semaphore_,
+          trans_model_, word_syms_, utt_this_thread,
+          acoustic_scale_, determinize_, allow_partial_, alignments_writer_,
+          words_writer_, compact_lattice_writer_, lattice_writer_,
+          &like, &lat)
+        ) {
+        tot_like += like;
+        num_success++;
+    } else num_fail++;
+
+    std::cout << "Thread 111" << std::endl;
+    double t1 = timer.Elapsed();
+    elapsed += t1;
+    if (num_success % config_.mem_print_freq == 0)
+      GetFreeMemoryStat("");
+    
+    // decodable will be not used in DecodeUtteranceLatticeFasterCudaOutput()
+    Matrix<BaseFloat> tmp(0,0);
+    MatrixChunker decodable(tmp, 0);
+    // lock inside
+    std::cout << "Thread 222" << std::endl;
+    DecodeUtteranceLatticeFasterCudaOutput(
+        decoder, decodable, trans_model_, word_syms_, utt_this_thread,
+        acoustic_scale_, determinize_, allow_partial_, alignments_writer_,
+        words_writer_, compact_lattice_writer_, lattice_writer_,
+        &like, lat, utt_mutex_);
+    elapsed2 = timer.Elapsed() - t1;
+
+    delete utts_semaphores_->at(utt_this_thread);
+  } // end of an utterance
+
+  KALDI_LOG << "Done " << num_success << " utterances, failed for "
+            << num_fail;
+  KALDI_LOG << "Overall log-likelihood per frame is "
+            << (tot_like / frame_count) << " over "
+            << frame_count << " frames.";
+
+  utt_mutex_->lock();
+  if (like_sum_ != NULL) *like_sum_ += tot_like;
+  if (num_done_ != NULL) (*num_done_) += num_success;
+  if (num_err_ != NULL) (*num_err_) += num_fail;
+  utt_mutex_->unlock();
+}
 
 } // end namespace kaldi.

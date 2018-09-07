@@ -116,6 +116,11 @@ int main(int argc, char *argv[]) {
       exit(1);
     }
 
+#if HAVE_CUDA==1
+    CuDevice::Instantiate().SelectGpuId(use_gpu);
+    CuDevice::Instantiate().AllowMultithreading();
+#endif
+
     std::string nnet_rxfilename = po.GetArg(1),
                 fst_in_str = po.GetArg(2),
                 feature_rspecifier = po.GetArg(3),
@@ -162,10 +167,6 @@ int main(int argc, char *argv[]) {
       }
     }
 
-#if HAVE_CUDA==1
-    CuDevice::Instantiate().SelectGpuId(use_gpu);
-    CuDevice::Instantiate().AllowMultithreading();
-#endif
     double elapsed = 0.0;
     double tot_like = 0.0;
     int64 frame_count = 0;

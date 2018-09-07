@@ -66,6 +66,17 @@ class LatticeFasterDecoderCuda {
   // the main procedure is done in GPU
   bool Decode(MatrixChunker *decodable);
   bool Decode(CuMatrixChunker *decodable);
+  bool Decode(
+    std::string utt_id,
+    std::mutex *utt_mutex,  // The following part provides chunk information.
+    unordered_map<std::string,
+     std::queue<const CuMatrix<BaseFloat>* > > *finished_inf_utts,
+    unordered_map<std::string, size_t> *finished_dec_utts,
+    const unordered_map<std::string, bool> &is_end,
+    unordered_map<std::string, Semaphore* > *utts_semaphores, // the ownership
+    int32 *chunk_counter,
+    int32 batch_size,
+    Semaphore *batch_compute_semaphore);
 
   // the same to the version in lattice-faster-decoder.h
   // says whether a final-state was active on the last frame.  If it was not, the

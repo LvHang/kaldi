@@ -97,11 +97,99 @@ bool LatticeFasterDecoderCuda::Decode(MatrixChunker *decodable) {
   return !active_toks_.empty() && active_toks_.back().toks != NULL;
 }
 
+
 bool LatticeFasterDecoderCuda::Decode(CuMatrixChunker *decodable) {
   PUSH_RANGE("CudaLatticeDecoder::Decode::init_search", 0);
   InitDecoding(); // CPU init
   decoder_.InitDecoding(); // GPU init
   decoder_.Decode(decodable);
+  POP_RANGE;
+
+  PUSH_RANGE("CudaLatticeDecoder::Decode::final", 1);
+  cuToken* toks_buf;
+  int* toks_sidx;
+  LatLink* arcs_buf;
+  int* arcs_size;
+  cuTokenVector* last_tokv;
+  // GPU lattice processing and D2H data trasnfer
+  int num_frames_decoded;
+  decoder_.FinalProcessLattice(&toks_buf, &toks_sidx, &arcs_buf, 
+                               &arcs_size, &last_tokv, &num_frames_decoded);
+  // CPU lattice processing
+  FinalProcessLattice(last_tokv, toks_buf, toks_sidx, arcs_buf, arcs_size,
+                      num_frames_decoded);
+  // final lattice arc pruning and state trims
+  // it is the same to CPU decoder in lattice-faster-decoder.h
+  FinalizeDecoding();   
+  // Returns true if we have any kind of traceback available (not necessarily
+  // to the end state; query ReachedFinal() for that).
+  POP_RANGE;
+  assert(NumFramesDecoded() == NumFramesDecoded());
+  return !active_toks_.empty() && active_toks_.back().toks != NULL;
+}
+
+
+bool LatticeFasterDecoderCuda::Decode(
+    std::string utt_id,
+    std::mutex *utt_mutex,  // The following part provides chunk information.
+    unordered_map<std::string,
+     std::queue<const CuMatrix<BaseFloat>* > > *finished_inf_utts,
+    unordered_map<std::string, size_t> *finished_dec_utts,
+    const unordered_map<std::string, bool> &is_end,
+    unordered_map<std::string, Semaphore* > *utts_semaphores, // the ownership
+    int32 *chunk_counter,
+    int32 batch_size,
+    Semaphore *batch_compute_semaphore) {
+  PUSH_RANGE("CudaLatticeDecoder::Decode::init_search", 0);
+  InitDecoding(); // CPU init
+  decoder_.InitDecoding(); // GPU init
+
+  std::cout << "Inside 000" << std::endl;
+  // Read the chunk from finished_inf_utts one by one, and DecodeChunk.
+  while (true)  {
+    std::cout << "Inside 111" << std::endl;
+    utt_mutex->lock();
+    if ( *chunk_counter > batch_size) {
+      *chunk_counter -= batch_size;
+      batch_compute_semaphore->Signal();
+    }
+    utt_mutex->unlock();
+
+    std::cout << "Inside 222" << std::endl;
+    // The generated chunk always be pushed into queue firstly and then
+    // check whether it is the end or not.
+    if (is_end.at(utt_id) &&
+        finished_inf_utts->at(utt_id).empty() ) {
+        break;
+    }
+
+    std::cout << "Inside 333" << std::endl;
+    // check the chunk_counter_ and deal with batch_compute_semaphore_    
+    utts_semaphores->find(utt_id)->second->Wait();
+
+    std::cout << "Inside 444" << std::endl;
+    // The space is created on heap. When loglikes is used, release it.
+    CuMatrixBase<BaseFloat>* loglikes =
+      const_cast<CuMatrix<BaseFloat>* >
+      (finished_inf_utts->find(utt_id)->second.front());
+    finished_inf_utts->find(utt_id)->second.pop();
+    (finished_dec_utts->find(utt_id)->second)++;
+
+    std::cout << "Inside 555" << std::endl;
+    decoder_.DecodeChunk(loglikes);
+
+    std::cout << "Inside 666" << std::endl;
+    //This chunk has been used. Release the memory
+    delete loglikes;
+
+    // increase the chunk_counter_
+    utt_mutex->lock();
+    (*chunk_counter)++;
+    utt_mutex->unlock();
+  } // end of a chunk
+ 
+  // finish decode the utterance 
+  delete utts_semaphores->at(utt_id);
   POP_RANGE;
 
   PUSH_RANGE("CudaLatticeDecoder::Decode::final", 1);

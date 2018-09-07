@@ -133,6 +133,34 @@ bool DecodeUtteranceLatticeFasterCuda(
   Lattice* olat);
 
 
+// This function is used to wrap the chunk version decoder. In this version,
+// we don't use MatrixChunker which is used to split a whole loglike matrix into
+// pieces. In this version, we take each chunk from finished_inf_utts directly.
+bool DecodeUtteranceLatticeFasterCudaChunkVersion(
+  LatticeFasterDecoderCuda &decoder, // not const but is really an input.
+  std::mutex *utt_mutex,  // The following part provides chunk information.
+  unordered_map<std::string,
+    std::queue<const CuMatrix<BaseFloat>* > > *finished_inf_utts,
+  unordered_map<std::string, size_t> *finished_dec_utts,
+  const unordered_map<std::string, bool> &is_end,
+  unordered_map<std::string, Semaphore* > *utts_semaphores, // the ownership
+  int32 *chunk_counter,
+  int32 batch_size,
+  Semaphore *batch_compute_semaphore,
+  const TransitionModel &trans_model,
+  const fst::SymbolTable *word_syms,
+  std::string utt,
+  double acoustic_scale,
+  bool determinize,
+  bool allow_partial,
+  Int32VectorWriter *alignment_writer,
+  Int32VectorWriter *words_writer,
+  CompactLatticeWriter *compact_lattice_writer,
+  LatticeWriter *lattice_writer,
+  double *like_ptr,
+  Lattice* olat);
+
+
 // GPU decoding interface of outputting lattice
 // use a separate interface is to do the output in a critical section
 // e.g. using #pragma omp critical { }

@@ -138,7 +138,6 @@ void Controller::Run() {
 
     // Initialize
     batch_computer_->AcceptInput(utt, features, ivector, online_ivectors);
-    std::cout << utt << std::endl;
     repository_->AcceptUtterance(utt);
 
     utt_mutex_->lock();

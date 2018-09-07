@@ -652,7 +652,6 @@ void BatchComputer::DoNnetComputationOnes(
         dest.CopyFromVec(src);
       }
     }
-    std::cout << "input matrix finished Ones" << std::endl;
     // Update ivector matrix
     // If the nnet_ doesn't have ivector, nothing will be returned by
     // GetCurrentIvector. So the ivector.Dim() == 0, and the tot_ivector will
@@ -666,7 +665,6 @@ void BatchComputer::DoNnetComputationOnes(
                       last_output_frame - first_output_frame, &ivector);
     if (ivector.Dim() != 0) {
       tot_ivector.Row(n).CopyFromVec(ivector);
-      std::cout << "ivector matrix finished Ones" << std::endl;
     }
     input_count += num_input_frames;
   }
@@ -706,7 +704,6 @@ void BatchComputer::DoNnetComputationOnes(
     output->CopyFromMat(cu_output.RowRange(output_count, num_rows));
     // Add the result
     (*result)[utt_id].push(output);
-    (*utts_semaphores)[utt_id]->Signal();
     output_count += num_rows;
     // Set end symbol
     if ((last_subsampled_frame + 1) ==
@@ -716,6 +713,7 @@ void BatchComputer::DoNnetComputationOnes(
       // This utterance has been finished. Clear it.
       Clear(utt_id);
     }
+    (*utts_semaphores)[utt_id]->Signal();
   }
   // Clear
   batch_info_[current_context]->clear();
@@ -769,9 +767,6 @@ void BatchComputer::DoNnetComputation(
                first_input_frame, last_input_frame,
                first_subsampled_frame, last_subsampled_frame,
                output_offset) = *iter;
-      std::cout << utt_id << " " << first_input_frame << " "
-                << last_input_frame << " " << first_subsampled_frame << " "
-                << last_subsampled_frame << " " << output_offset << std::endl;
 
       std::unordered_map<std::string, const Matrix<BaseFloat>* >::iterator
         feats_iter;
@@ -815,10 +810,6 @@ void BatchComputer::DoNnetComputation(
     NnetComputer computer(opts_.compute_config, *computation,
                           nnet_, nnet_to_update);
     CuMatrix<BaseFloat> input_feats_cu(tot_input);
-    std::cout << "Input matrix is " << input_feats_cu.NumRows() << "*" 
-                                    << input_feats_cu.NumCols() << std::endl;
-    std::cout << "Ivector matrix is " << tot_ivector.NumRows() << "*"
-                                      << tot_ivector.NumCols() << std::endl; 
     computer.AcceptInput("input", &input_feats_cu);
     CuMatrix<BaseFloat> ivector_feats_cu;
     // tot_ivector.NumCols() == 0 means that nnet_ doesn't have ivector
@@ -827,9 +818,7 @@ void BatchComputer::DoNnetComputation(
       ivector_feats_cu.CopyFromMat(tot_ivector);
       computer.AcceptInput("ivector", &ivector_feats_cu);
     }
-    std::cout << "before computer.run()" << std::endl;
     computer.Run();
-    std::cout << "after computer.run()" << std::endl;
     CuMatrix<BaseFloat> cu_output;
     computer.GetOutputDestructive("output", &cu_output);
     // Get Output
@@ -851,7 +840,6 @@ void BatchComputer::DoNnetComputation(
                                                             output_dim_);
       output->CopyFromMat(cu_output.RowRange(
               n * num_batch_output_rows + output_offset, num_rows));
-      (*utts_semaphores)[utt_id]->Signal();
       // Add the result
       (*result)[utt_id].push(output);
       if ((last_subsampled_frame + 1) ==
@@ -861,6 +849,7 @@ void BatchComputer::DoNnetComputation(
         // This utterance has been finished. Clear it.
         Clear(utt_id);
       }
+      (*utts_semaphores)[utt_id]->Signal();
     }
     // Clear
     batch_info_[current_context]->clear();
@@ -1116,17 +1105,12 @@ bool BatchComputer::PrepareBatchInfo(
   // Debug
   for (BatchInfoMap::iterator it = batch_info_.begin(); it != batch_info_.end();
        it++) {
-    std::cout << "Context is (" << (it->first).first << ", "
-              << (it->first).second << ")" << std::endl;
     for (BatchInfoQueue::iterator it_q = (*it->second).begin();
          it_q != (*it->second).end(); it_q++) {
       std::string utt_id;
       int32 input_begin, input_end, output_begin, output_end, offset;
       std::tie(utt_id, input_begin, input_end, output_begin,
                output_end, offset) = *it_q;
-      std::cout << utt_id << " " << input_begin << " " << input_end << " "
-                << output_begin << " " << output_end << " " << offset
-                << std::endl;
     }
   }
   return flush;
@@ -1150,13 +1134,9 @@ BatchComputerClass::BatchComputerClass(
 
 void BatchComputerClass::operator () () {
   while (true) {
-    std::cout << thread_id_ << " batch 111" << std::endl;
     batch_compute_semaphore_->Wait();
-    std::cout << thread_id_ << " batch 222" << std::endl;
     if (!batch_computer_->Done()) {
-      std::cout << thread_id_ << " batch 333" << std::endl;
       bool flush = batch_computer_->PrepareBatchInfo(finished_dec_utts_);
-      std::cout << thread_id_ << " batch 444" << std::endl;
       batch_computer_->Compute(flush, finished_inf_utts_, is_end_,
                                utts_semaphores_);
     } else {

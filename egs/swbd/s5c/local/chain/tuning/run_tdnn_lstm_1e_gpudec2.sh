@@ -6,7 +6,7 @@
 #         3. as libkaldi-decoder.so needs the CUDA runtime libraries, other libraries using
 #            libkaldi-decoder.so also needs them.
 
-stage=19
+stage=20
 nj=4
 data=data/eval2000_hires
 
@@ -44,11 +44,12 @@ if [ $stage -le 20 ]; then
   [[ -d $sdata && $data/feats.scp -ot $sdata ]] || split_data.sh $data $nj || exit 1;
   echo $nj > $dir/num_jobs
 
-  queue.pl JOB=1:$nj $dir/log/decode.JOB.log \
+  $cuda_cmd JOB=1:$nj $dir/log/decode.JOB.log \
   nnet3-compute-gpu --utt2spk=ark:$sdata/JOB/utt2spk --online-ivectors=scp:exp/nnet3/ivectors_eval2000/ivector_online.scp \
-    --online-ivector-period=10 --allow-partial=true --num-threads=2 --word-symbol-table=$graphdir/words.txt \
+    --online-ivector-period=10 --allow-partial=true --num-threads=1 --word-symbol-table=$graphdir/words.txt \
     --extra-left-context=50 --extra-right-context=0 --extra-left-context-initial=0 --extra-right-context-final=0 \
-    --frame-subsampling-factor=3 --frames-per-chunk=140 --beam=13 --gpu-raction=0.1 --determinize-lattice=false \
+    --frame-subsampling-factor=3 --frames-per-chunk=140 --beam=13 --gpu-fraction=0.1 --determinize-lattice=false \
+    --minibatch-size=32 \
     $model_dir/final.mdl $graphdir/HCLG.fst scp:$sdata/JOB/feats.scp \
     "ark:|lattice-scale --acoustic-scale=10.0 ark:- ark:- | gzip -c >  $decdir/lat.$subset.gz" \
     ark,t:$decdir/words.$subset.txt ark,t:$decdir/ali.$subset.txt 
