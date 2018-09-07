@@ -144,10 +144,8 @@ bool LatticeFasterDecoderCuda::Decode(
   InitDecoding(); // CPU init
   decoder_.InitDecoding(); // GPU init
 
-  std::cout << "Inside 000" << std::endl;
   // Read the chunk from finished_inf_utts one by one, and DecodeChunk.
   while (true)  {
-    std::cout << "Inside 111" << std::endl;
     utt_mutex->lock();
     if ( *chunk_counter > batch_size) {
       *chunk_counter -= batch_size;
@@ -155,7 +153,6 @@ bool LatticeFasterDecoderCuda::Decode(
     }
     utt_mutex->unlock();
 
-    std::cout << "Inside 222" << std::endl;
     // The generated chunk always be pushed into queue firstly and then
     // check whether it is the end or not.
     if (is_end.at(utt_id) &&
@@ -163,11 +160,9 @@ bool LatticeFasterDecoderCuda::Decode(
         break;
     }
 
-    std::cout << "Inside 333" << std::endl;
     // check the chunk_counter_ and deal with batch_compute_semaphore_    
     utts_semaphores->find(utt_id)->second->Wait();
 
-    std::cout << "Inside 444" << std::endl;
     // The space is created on heap. When loglikes is used, release it.
     CuMatrixBase<BaseFloat>* loglikes =
       const_cast<CuMatrix<BaseFloat>* >
@@ -175,10 +170,8 @@ bool LatticeFasterDecoderCuda::Decode(
     finished_inf_utts->find(utt_id)->second.pop();
     (finished_dec_utts->find(utt_id)->second)++;
 
-    std::cout << "Inside 555" << std::endl;
     decoder_.DecodeChunk(loglikes);
 
-    std::cout << "Inside 666" << std::endl;
     //This chunk has been used. Release the memory
     delete loglikes;
 

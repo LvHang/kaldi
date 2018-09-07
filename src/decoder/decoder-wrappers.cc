@@ -339,7 +339,6 @@ bool DecodeUtteranceLatticeFasterCudaChunkVersion(
   Lattice* olat) { // puts utterance's like in like_ptr on success.
   using fst::VectorFst;
 
-  std::cout << "Decode 000" << std::endl;
   if (!decoder.Decode(utt, utt_mutex, finished_inf_utts, finished_dec_utts,
                       is_end, utts_semaphores, chunk_counter, batch_size,
                       batch_compute_semaphore)) {
@@ -347,7 +346,6 @@ bool DecodeUtteranceLatticeFasterCudaChunkVersion(
     return false;
   }
 
-  std::cout << "Decode 111" << std::endl;
   if (!decoder.ReachedFinal()) {
     if (allow_partial) {
       KALDI_WARN << "Outputting partial output for utterance " << utt
@@ -1058,7 +1056,6 @@ void DecodeUtteranceLatticeClassCuda::operator () () {
     timer.Reset();
     double like;
     Lattice lat;
-    std::cout << "Thread 000" << std::endl;
     if (DecodeUtteranceLatticeFasterCudaChunkVersion(
           decoder,
           utt_mutex_, finished_inf_utts_, finished_dec_utts_, is_end_,
@@ -1073,7 +1070,6 @@ void DecodeUtteranceLatticeClassCuda::operator () () {
         num_success++;
     } else num_fail++;
 
-    std::cout << "Thread 111" << std::endl;
     double t1 = timer.Elapsed();
     elapsed += t1;
     if (num_success % config_.mem_print_freq == 0)
@@ -1083,7 +1079,6 @@ void DecodeUtteranceLatticeClassCuda::operator () () {
     Matrix<BaseFloat> tmp(0,0);
     MatrixChunker decodable(tmp, 0);
     // lock inside
-    std::cout << "Thread 222" << std::endl;
     DecodeUtteranceLatticeFasterCudaOutput(
         decoder, decodable, trans_model_, word_syms_, utt_this_thread,
         acoustic_scale_, determinize_, allow_partial_, alignments_writer_,
