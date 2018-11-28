@@ -118,6 +118,23 @@ class Lattice2BiglmFasterDecoder {
     // terms of features), but note that the decodable object uses zero-based
     // numbering, which we have to correct for when we call it.
     for (int32 frame = 1; !decodable->IsLastFrame(frame-2); frame++) {
+/*     // Check code
+      std::cout << "Check the shadowing token in Decode() on frame "
+                << frame << std::endl;
+      for (int32 frame_idx = 0; frame_idx <= active_toks_.size(); frame_idx++) {
+        for (Token *tok = active_toks_[frame_idx].toks; tok != NULL; tok = tok->next) {
+          if (tok->shadowing_tok) {  // shadowed token
+            for (ForwardLink *link = tok->links; link != NULL;
+                link = link->next) {
+              KALDI_ASSERT(link->ilabel == 0);
+            }
+          } else {  // exploring token
+
+          }
+        }
+      }
+      // End
+*/
       active_toks_.resize(frame+1); // new column
 
       ProcessEmitting(decodable, frame);
@@ -150,34 +167,11 @@ class Lattice2BiglmFasterDecoder {
   void ExpandShadowTokens(int32 frame) {
     assert(frame >= 0);
     
+    std::cout << "In frame " << frame << std::endl;
     BuildBackfillMap(frame);
     if ( (frame + 1) <= active_toks_.size()) {
       BuildBackfillMap(frame+1);
     }
-    if (frame == 0) {
-      Token *tok = (*toks_backfill_hclg_[1])[7164];
-      ForwardLink *link;
-      std::cout << "(7164,19) checked in frame 0" << std::endl;
-        for(link = tok->links; link != NULL; link = link->next) {
-          std::cout << " ilabel is " << link->ilabel
-                    << " olabel is " << link->olabel
-                    << " next token HCLG is " << link->next_tok->hclg_state
-                    << " next token lm is " << link->next_tok->lm_state
-                    << " frame is " << frame
-                    << std::endl;
-        }
-    }
-
-    std::cout << "The expanding frame is " << frame << std::endl;
-    for (int32 i = 0; i <= frame+1; i++) {
-      std::cout << toks_backfill_pair_[i]->size() << " ";
-    }
-    std::cout << std::endl;
-    for (int32 i = 0; i <= frame+1; i++) {
-      std::cout << toks_backfill_hclg_[i]->size() << " ";
-    }
-    std::cout << std::endl;
-
     if (active_toks_[frame].toks == NULL) {
       KALDI_WARN << "ExpandShadowTokens: no tokens active on frame " << frame;
     }
@@ -206,44 +200,39 @@ class Lattice2BiglmFasterDecoder {
       
       Token* tok = (*toks_backfill_pair_[frame])[cur_id];
       Token* shadowing_tok = tok->shadowing_tok;
-      std::cout << "The current token is " << ConstructPair(tok->hclg_state,
-                                                            tok->lm_state)
-                << " HCLG id is " << tok->hclg_state
-                << " lm_id is " << tok->lm_state << std::endl;
-      std::cout << "The shadowing token is " << ConstructPair(shadowing_tok->hclg_state,
-                                                              shadowing_tok->lm_state)
-                << " HCLG id is " << shadowing_tok->hclg_state
-                << " lm_id is " << shadowing_tok->lm_state << std::endl;
-      std::cout << "   { " << std::endl;
-
+/*
+      std::cout << "Expanding: Frame " << frame
+                << " cur_token HCLG_id is " << tok->hclg_state
+                << " LM_id is " << tok->lm_state
+                << " .And shadowing_token HCLG_id is " << shadowing_tok->hclg_state
+                << " LM_id is " << shadowing_tok->lm_state << std::endl;
+*/
       for (ForwardLink *link = shadowing_tok->links; link != NULL; link = link->next) {
         Token *next_tok = link->next_tok;
-        std::cout << "The next token is " << ConstructPair(next_tok->hclg_state,
-                                                           next_tok->lm_state)
-                  << " HCLG id is " << next_tok->hclg_state
-                  << " lm_id is " << next_tok->lm_state
-                  << " .And the ilabel is " << link->ilabel
-                  << std::endl;
-
+       
         Arc arc(link->ilabel, link->olabel, link->graph_cost_ori, 0);
         StateId new_hclg_state = next_tok->hclg_state;
         StateId new_lm_state = PropagateLm(tok->lm_state, &arc); // may affect "arc.weight".
         PairId new_pair = ConstructPair(new_hclg_state, new_lm_state);
-        std::cout << "The new token is " << new_pair
-                  << " HCLG id is " << new_hclg_state
-                  << " lm_id is " << new_lm_state
-                  << std::endl;
-
         BaseFloat ac_cost = link->acoustic_cost,
                   graph_cost = arc.weight.Value(),
                   cur_cost = tok->tot_cost,
                   tot_cost = cur_cost + ac_cost + graph_cost;
         BaseFloat extra_cost = next_tok->extra_cost;
+
         // prepare to store a new token in the current / next frame
         int32 new_frame_index = link->ilabel ? frame+1 : frame; 
         Token *&toks = link->ilabel ? active_toks_[frame+1].toks : active_toks_[frame].toks;
         assert(toks);
-        
+/*
+        std::cout << "ilabel is " << link->ilabel
+                  << " Next token HCLG_id is " << next_tok->hclg_state
+                  << " LM_id is " << next_tok->lm_state
+                  << " extra_cost is " << next_tok->extra_cost
+                  << " New token HCLG_id is " << new_hclg_state
+                  << " LM_id is " << new_lm_state
+                  << " extra_cost is " << extra_cost << std::endl;
+*/    
         bool exist_flag = false;
         if (toks_backfill_pair_[new_frame_index]->find(new_pair) !=
             toks_backfill_pair_[new_frame_index]->end()) {
@@ -254,9 +243,6 @@ class Lattice2BiglmFasterDecoder {
         // state，but it gives that state a better forward cost than before.
         if (exist_flag && tot_cost <
             (*toks_backfill_pair_[new_frame_index])[new_pair]->tot_cost) {
-          std::cout << "In special case 1" << std::endl;
-          // Update the link
-          link->graph_cost = graph_cost;
           // Update the destination token
           ProcessBetterExistingToken(new_frame_index, new_pair, tot_cost);
         }
@@ -277,9 +263,6 @@ class Lattice2BiglmFasterDecoder {
           // Construct the new token.
           new_tok = new Token(tot_cost, extra_cost, NULL, toks, new_lm_state,
                               new_hclg_state);
-          std::cout << "A new token"
-                    << " HCLG id is " << new_hclg_state
-                    << " LM id is " << new_lm_state << std::endl;
           toks = new_tok;
           num_toks_++;
 
@@ -291,7 +274,6 @@ class Lattice2BiglmFasterDecoder {
           // Add the new token to "backfill" map.
           (*toks_backfill_pair_[new_frame_index])[new_pair] = new_tok;
         } else {  // An existing token
-          std::cout << "An existing token" << std::endl;
           new_tok = (*toks_backfill_pair_[new_frame_index])[new_pair];
         }
 
@@ -302,25 +284,48 @@ class Lattice2BiglmFasterDecoder {
 
         // Special case: A previously unseen state was created that has a higher
         // probability than an existing copy of the same HCLG.fst state.
-        std::cout << "The New HCLG state is " << new_hclg_state
-                  << " lm_id is " << new_lm_state << std::endl;
         if (tot_cost <
             (*toks_backfill_hclg_[new_frame_index])[new_hclg_state]->tot_cost) {
-          std::cout << "In case 2" << std::endl;
           ProcessBetterHCLGToken(new_frame_index, new_tok);
+          // The token has been processed along previous-best-HCLG token
+          new_tok->shadowing_tok = NULL;
         } else {
-          new_tok->shadowing_tok =
-            (*toks_backfill_hclg_[new_frame_index])[new_hclg_state];
+          if (!exist_flag) {
+            new_tok->shadowing_tok =
+              (*toks_backfill_hclg_[new_frame_index])[new_hclg_state];
+          }
         }
-
       }  // end of for loop
-      std::cout << " } " << std::endl;
       tok->shadowing_tok = NULL;  // already expand
     }
 
     // Clean the backfill map
     toks_backfill_pair_[frame]->clear();
     toks_backfill_hclg_[frame]->clear();
+    // Check code
+    std::cout << "CHeck the shadowing token in ExpandShadowTokens() on frame "
+              << frame << std::endl;
+    for (int32 frame_idx = 0; frame_idx <= active_toks_.size(); frame_idx++) {
+      for (Token *tok = active_toks_[frame_idx].toks; tok != NULL; tok = tok->next) {
+        if (tok->shadowing_tok != NULL) {  // shadowed token
+          for (ForwardLink *link = tok->links; link != NULL;
+              link = link->next) {
+            if (link->ilabel != 0) {
+              std::cout << "The bug is in frame " << frame_idx << std::endl;
+              std::cout << "The error token HCLG_id is " << tok->hclg_state
+                        << " LM_id is " << tok->lm_state
+                        << " .And shadowing token HCLG_id is " << tok->shadowing_tok->hclg_state
+                        << " LM_id is " << tok->shadowing_tok->lm_state << std::endl;
+            }
+            KALDI_ASSERT(link->ilabel == 0);
+          }
+        } else {  // exploring token
+
+        }
+      }
+    }
+    // End
+
   }
   /// says whether a final-state was active on the last frame.  If it was not, the
   /// lattice (or traceback) will end with states that are not final-states.
@@ -469,7 +474,7 @@ class Lattice2BiglmFasterDecoder {
                        ForwardLink *next, BaseFloat graph_cost_ori):
         next_tok(next_tok), ilabel(ilabel), olabel(olabel),
         graph_cost(graph_cost), acoustic_cost(acoustic_cost), 
-        next(next), graph_cost_ori(graph_cost_ori) { }
+        next(next), graph_cost_ori(graph_cost_ori) {}
   };  
   
   // Token is what's resident in a particular state at a particular time.
@@ -499,7 +504,7 @@ class Lattice2BiglmFasterDecoder {
     inline Token(BaseFloat tot_cost, BaseFloat extra_cost, ForwardLink *links,
                  Token *next, StateId lm_state, StateId hclg_state): tot_cost(tot_cost),
                  extra_cost(extra_cost), links(links), next(next),
-                 shadowing_tok(NULL), lm_state(lm_state), hclg_state(hclg_state) { }
+                 shadowing_tok(NULL), lm_state(lm_state), hclg_state(hclg_state) {}
 
     inline void DeleteForwardLinks() {
       ForwardLink *l = links, *m; 
@@ -614,14 +619,41 @@ class Lattice2BiglmFasterDecoder {
         for (link = tok->links; link != NULL; ) {
           // See if we need to excise this link...
           Token *next_tok = link->next_tok;
-          if (next_tok->shadowing_tok) { // TODO
-            prev_link = link; // move to next link
-            link = link->next;
-            continue;
+          BaseFloat link_extra_cost = 0.0;
+          if (next_tok->shadowing_tok) {
+            link_extra_cost = next_tok->shadowing_tok->extra_cost +
+              ((tok->tot_cost + link->acoustic_cost + link->graph_cost)
+               - next_tok->shadowing_tok->tot_cost);
+          } else {
+            link_extra_cost = next_tok->extra_cost +
+              ((tok->tot_cost + link->acoustic_cost + link->graph_cost)
+               - next_tok->tot_cost); // difference in brackets is >= 0
           }
+          /*
+          Token *next_tok = link->next_tok;
+          if (next_tok->shadowing_tok) {  // excise this link depend on the
+                                          // extra_cost of the shadowing token
+            if (next_tok->shadowing_tok->extra_cost ==
+                std::numeric_limits<BaseFloat>::infinity()) {  // The next_tok
+                                                               // will be deleted
+              ForwardLink *next_link = link->next;
+              if (prev_link != NULL) prev_link->next = link->next;
+              else tok->links = link->next;
+              delete link;
+              link = next_link; // advance link but leave prev_link the same.
+              *links_pruned = true;
+              continue;
+            } else {
+              prev_link = link; // move to next link
+              link = link->next;
+              continue;
+            }
+          }
+          
           BaseFloat link_extra_cost = next_tok->extra_cost +
               ((tok->tot_cost + link->acoustic_cost + link->graph_cost)
                - next_tok->tot_cost); // difference in brackets is >= 0
+          */
           // link_exta_cost is the difference in score between the best paths
           // through link source state and through link destination state
           KALDI_ASSERT(link_extra_cost == link_extra_cost); // check for NaN
@@ -774,7 +806,6 @@ class Lattice2BiglmFasterDecoder {
   // a problem with dangling pointers].
   // It's called by PruneActiveTokens if any forward links have been pruned
   void PruneTokensForFrame(int32 frame) {
-    std::cout << "Call PruneTokenForFrame() in " << frame << std::endl;
     KALDI_ASSERT(frame >= 0 && frame < active_toks_.size());
     Token *&toks = active_toks_[frame].toks;
     if (toks == NULL)
@@ -789,16 +820,13 @@ class Lattice2BiglmFasterDecoder {
           // excise tok from list and delete tok.
           if (prev_tok != NULL) prev_tok->next = tok->next;
           else toks = tok->next;
-          if (frame == 2) {
-            std::cout << "Deleting in shadowed loop "
-                      << "The frame is " << frame
-                      << " HCLG state is " << tok->hclg_state
-                      << " lm state is " << tok->lm_state << std::endl;
-          }
           delete tok;
           num_toks_--;
         } else { // fetch next Token
           prev_tok = tok;
+          KALDI_ASSERT(tok->shadowing_tok->tot_cost <= tok->tot_cost);
+          tok->extra_cost = tok->shadowing_tok->extra_cost +
+                            tok->shadowing_tok->tot_cost - tok->tot_cost;
         }
       } else {
         prev_tok = tok;
@@ -813,12 +841,6 @@ class Lattice2BiglmFasterDecoder {
           // excise tok from list and delete tok.
           if (prev_tok != NULL) prev_tok->next = tok->next;
           else toks = tok->next;
-          if (frame == 2) {
-            std::cout << "Deleting in shadowing loop "
-                      << "The frame is " << frame
-                      << " HCLG state is " << tok->hclg_state
-                      << " lm state is " << tok->lm_state << std::endl;
-          }
           delete tok;
           num_toks_--;
         } else { // fetch next Token
@@ -856,6 +878,10 @@ class Lattice2BiglmFasterDecoder {
       if (frame+1 < cur_frame &&      // except for last frame (no forward links)
          active_toks_[frame+1].must_prune_tokens) {
         PruneTokensForFrame(frame+1);
+        // Check
+        for (Token *tok = active_toks_[frame+1].toks; tok != NULL; tok = tok->next) {
+          KALDI_ASSERT(tok->extra_cost != std::numeric_limits<BaseFloat>::infinity());
+        }
         active_toks_[frame+1].must_prune_tokens = false;
       }
     }
@@ -973,7 +999,7 @@ class Lattice2BiglmFasterDecoder {
     BaseFloat adaptive_beam;
     size_t tok_cnt;
     BaseFloat cur_cutoff = GetCutoff(last_toks, &tok_cnt, &adaptive_beam, &best_elem);
-    PossiblyResizeHash(tok_cnt);  // This makes sure the hash is always big enough.    
+    PossiblyResizeHash(tok_cnt);  // This makes sure the hash is always big enough.
     // TODO PossiblyResizeHash for toks_shadowing_
     KALDI_VLOG(6) << "Adaptive beam on frame " << frame << "\t" << NumFramesDecoded() << " is "
                 << adaptive_beam << "\t" << cur_cutoff;
@@ -1020,7 +1046,8 @@ class Lattice2BiglmFasterDecoder {
       if (tok->tot_cost <=  cur_cutoff) {
         Elem_Shadow *elem = toks_shadowing_check.Find(state);
         assert(elem);
-        if (elem->val == tok) { // shadowing
+        if (elem->val == tok) { // explore
+          KALDI_ASSERT(tok->shadowing_tok == NULL);
           for (fst::ArcIterator<fst::Fst<Arc> > aiter(fst_, state);
                !aiter.Done();
                aiter.Next()) {
@@ -1051,7 +1078,9 @@ class Lattice2BiglmFasterDecoder {
                                            graph_cost, ac_cost, tok->links, graph_cost_ori);
             }
           } // for all arcs
-          tok->shadowing_tok = NULL; // it's shadowing token
+          KALDI_ASSERT(tok->shadowing_tok == NULL); // it's shadowing token
+        } else {
+          KALDI_ASSERT(tok->shadowing_tok != NULL);
         }
       }
       e_tail = e->tail;
@@ -1104,7 +1133,7 @@ class Lattice2BiglmFasterDecoder {
       // but since most states are emitting it's not a huge issue.
       Elem_Shadow *elem = toks_shadowing_check.Find(state);
       assert(elem);
-      if (elem->val == tok) { // shadowing
+      if (elem->val == tok) { // Explore the best token in certain HCLG state
         tok->DeleteForwardLinks(); // necessary when re-visiting
         tok->links = NULL;
         for (fst::ArcIterator<fst::Fst<Arc> > aiter(fst_, state);
@@ -1138,11 +1167,7 @@ class Lattice2BiglmFasterDecoder {
             }
           }
         }  // for all arcs
-        tok->shadowing_tok = NULL;  // Currently, this token is the best one
-                                    // in its HCLG state and we have already
-                                    // processed it.
-      }  // for current best token in certain HCLG state
-      tok->shadowing_tok = elem->val;
+      }  // end of if condition
     }  // while queue not empty
 
     // Make the "shadowing_tok" pointer point to the best one with the same
@@ -1256,10 +1281,9 @@ class Lattice2BiglmFasterDecoder {
   void BuildBackfillMap(int32 frame) {
     KALDI_ASSERT(toks_backfill_pair_.size() == toks_backfill_hclg_.size());
     // We have already construct the map when we previous special case.
-    if (toks_backfill_pair_.size() != frame) { return; }
+    if (toks_backfill_pair_.size() != frame ||
+        active_toks_.size() == toks_backfill_pair_.size()) { return; }
 
-    std::cout << "Now, we are in frame " << frame << std::endl;
-    
     if (active_toks_[frame].toks == NULL) {
       KALDI_WARN << "BuildBackfillMap: no tokens active on frame " << frame;
     }
@@ -1271,30 +1295,6 @@ class Lattice2BiglmFasterDecoder {
       new std::unordered_map<StateId, Token*>();
 
     for(Token *tok = active_toks_[frame].toks; tok != NULL; tok = tok->next) {
-      if (tok->hclg_state == 7164 && tok->lm_state == 19) {
-        ForwardLink *link;
-        std::cout << "(7164,19) information" << std::endl;
-        for(link = tok->links; link != NULL; link = link->next) {
-          std::cout << " ilabel is " << link->ilabel
-                    << " olabel is " << link->olabel
-                    << " next token HCLG is " << link->next_tok->hclg_state
-                    << " next token lm is " << link->next_tok->lm_state
-                    << " frame is " << frame
-                    << std::endl;
-        }
-      }
-      if (tok->hclg_state == 7164 && tok->lm_state == 44) {
-        ForwardLink *link;
-        std::cout << "(7164,44) information" << std::endl;
-        for(link = tok->links; link != NULL; link = link->next) {
-          std::cout << " ilabel is " << link->ilabel
-                    << " olabel is " << link->olabel
-                    << " next token HCLG is " << link->next_tok->hclg_state
-                    << " next token lm is " << link->next_tok->lm_state
-                    << " frame is " << frame
-                    << std::endl;
-        }
-      }
       PairId cur_pair_id = ConstructPair(tok->hclg_state, tok->lm_state);
       StateId cur_hclg_id = tok->hclg_state;
 
@@ -1309,113 +1309,160 @@ class Lattice2BiglmFasterDecoder {
         (*hclg_map)[cur_hclg_id] = tok;
       }
     }
-    for(Token *tok = active_toks_[frame].toks; tok != NULL; tok = tok->next) {
-      if (tok->hclg_state == 7164 && tok->lm_state == 19) {
-        ForwardLink *link;
-        std::cout << "(7164,19) information" << std::endl;
-        for(link = tok->links; link != NULL; link = link->next) {
-          std::cout << " ilabel is " << link->ilabel
-                    << " olabel is " << link->olabel
-                    << " next token HCLG is " << link->next_tok->hclg_state
-                    << " next token lm is " << link->next_tok->lm_state
-                    << " frame is " << frame
-                    << std::endl;
-        }
-      }
-    }
 
     toks_backfill_pair_.push_back(pair_map);
     toks_backfill_hclg_.push_back(hclg_map);
 
     // for check
-    for (Token *tok = active_toks_[frame].toks; tok != NULL; tok = tok-> next) {
-      PairId current_pair_id = ConstructPair(tok->hclg_state, tok->lm_state);
-      StateId current_hclg_id = tok->hclg_state;
-      Token* shadowing_tok = tok->shadowing_tok;
-      Token* best_tok = (*hclg_map)[current_hclg_id];
-      if (shadowing_tok) {
-        std::cout << "Token: pair_id is " << current_pair_id
-                  << " HCLG_id is " << current_hclg_id
-                  << " and lm_id is " << tok->lm_state
-                  << " , shadowing token id is "
-                  << ConstructPair(shadowing_tok->hclg_state,
-                                   shadowing_tok->lm_state)
-                  << " HCLG_id is " << shadowing_tok->hclg_state
-                  << " and lm_id is " << shadowing_tok->lm_state
-                  << " , the best token in this HCLG state is "
-                  << ConstructPair(best_tok->hclg_state,
-                                   best_tok->lm_state)
-                  << " HCLG_id is " << best_tok->hclg_state
-                  << " and lm_id is " << best_tok->lm_state
-                  << std::endl;
-      } else {
-        std::cout << "Token: pair_id is " << current_pair_id
-                  << " HCLG_id is " << current_hclg_id
-                  << " and lm_id is " << tok->lm_state
-                  << " and the best token in this HCLG state is "
-                  << ConstructPair(best_tok->hclg_state,
-                                   best_tok->lm_state)
-                  << " HCLG_id is " << best_tok->hclg_state
-                  << " and lm_id is " << best_tok->lm_state
-                  << std::endl;
-      }
-    }
   }
 
   void ProcessBetterExistingToken(int32 cur_frame,
                                   PairId new_pair_id,
                                   BaseFloat new_tot_cost) {
-    if (cur_frame >= active_toks_.size()) {  // have already expand to newest
-                                             // frame
+    if (cur_frame > active_toks_.size() - 1) {  // have already expand to newest
+                                                // frame
       return;
     }
+    
+
     BuildBackfillMap(cur_frame);
 
     KALDI_ASSERT((*toks_backfill_pair_[cur_frame])[new_pair_id]);
+
     Token *ori_tok = (*toks_backfill_pair_[cur_frame])[new_pair_id];
     BaseFloat diff = ori_tok->tot_cost - new_tot_cost;
-    if (diff < 0) {
+    if (diff <= 0) {
       return;
     }
 
     // Update the token
     ori_tok->tot_cost = new_tot_cost;
-    ori_tok->extra_cost = ori_tok->extra_cost - diff;
-
+    BaseFloat new_extra_cost = ori_tok->extra_cost - diff;
+    ori_tok->extra_cost = new_extra_cost ? new_extra_cost : 0;
+/*
+    std::cout << "Case1: Frame " << cur_frame
+              << " HCLG_id is " << ori_tok->hclg_state
+              << " LM_id is " << ori_tok->lm_state 
+              << " Extra_cost is " << ori_tok->extra_cost
+              << " Diff is " << diff << std::endl;
+*/
     // The "ori_tok" could be a shadowed token or exploring token.
+    // If shadowing token is NULL, it means the token has already been expanded.
+    // So we only need to expand the change of tot_cost along each arc.
+    // If shadowing token isn't NULL, it means the token is shadowed. We will
+    // expand it. In this circumstance, the "links" maybe empty or not, which
+    // can be caused by ProcessNonemitting() [The token was the best token in
+    // certain HCLG state--"A" on this frame. But the processing of other token
+    // create a better token in this HCLG state--"A", so that both of the two
+    // tokens did the non-emit expand. The former one is shadowed token with
+    // link, the latter one was processed in "exploration" step.]
+    if (ori_tok->shadowing_tok == NULL) {  // The token was expanded
+      // Expand the change of tot_cost along each arc.
+      for (ForwardLink *link = ori_tok->links; link != NULL;
+           link = link->next) {
+        Token *next_tok = link->next_tok;
+        int32 new_frame_index = link->ilabel ? cur_frame + 1 : cur_frame;
+        PairId next_pair_id = ConstructPair(next_tok->hclg_state,
+                                            next_tok->lm_state);
+        BaseFloat new_tot_cost = next_tok->tot_cost - diff;
+        ProcessBetterExistingToken(new_frame_index, next_pair_id, new_tot_cost);
+      }
+      // Check the token. It is the new best HCLG token or not
+      if (ori_tok->tot_cost <
+          (*toks_backfill_hclg_[cur_frame])[ori_tok->hclg_state]->tot_cost) {
+        // Get the Best HCLG token
+        Token* pre_best_hclg_tok =
+          (*toks_backfill_hclg_[cur_frame])[ori_tok->hclg_state];
+
+        // Update the hclg list
+        (*toks_backfill_hclg_[cur_frame])[ori_tok->hclg_state] = ori_tok;
+
+        // Update the exploring list
+        if (cur_frame == active_toks_.size() - 1) {
+          HashList<StateId, Token*> &toks_shadowing_mod =
+            toks_shadowing_[cur_frame % 2];
+          StateId state = PairToState(new_pair_id);
+          Elem_Shadow *elem = toks_shadowing_mod.Find(state);
+          KALDI_ASSERT(elem);
+          KALDI_ASSERT(elem->val == pre_best_hclg_tok);
+          elem->val = ori_tok;
+          pre_best_hclg_tok->shadowing_tok = ori_tok;
+        }
+      }
+    } else {  // The token hasn't been expanded
+      if (ori_tok->links == NULL) {
+        // If the token is the new best HCLG token, go on expanding.
+        if (ori_tok->tot_cost <
+            (*toks_backfill_hclg_[cur_frame])[ori_tok->hclg_state]->tot_cost) {
+          // Inside, the ori_tok->shadowing_tok will be set to NULL.
+          ProcessBetterHCLGToken(cur_frame, ori_tok);
+        }
+      } else {  // An unexpanded token with links
+        // Handle the links
+        for (ForwardLink *link = ori_tok->links; link != NULL;
+             link = link->next) {
+          Token *next_tok = link->next_tok;
+          KALDI_ASSERT(link->ilabel == 0);  // These links should be generated
+                                            // from ProcessNonemitting().
+          PairId next_pair_id = ConstructPair(next_tok->hclg_state,
+                                              next_tok->lm_state);
+          BaseFloat new_tot_cost = next_tok->tot_cost - diff;
+          ProcessBetterExistingToken(cur_frame, next_pair_id,
+                                     new_tot_cost);
+        }
+        // Check the token.
+        if (ori_tok->tot_cost <
+            (*toks_backfill_hclg_[cur_frame])[ori_tok->hclg_state]->tot_cost) {
+          // Inside, the ori_tok->shadowing_tok will be set to NULL.
+          ProcessBetterHCLGToken(cur_frame, ori_tok);
+        }
+      }
+    }
+
+    /*
     if (ori_tok->shadowing_tok != NULL) {
       Token *best_hclg_tok =
         (*toks_backfill_hclg_[cur_frame])[ori_tok->hclg_state];
       if (ori_tok->tot_cost < best_hclg_tok->tot_cost) {
         ProcessBetterHCLGToken(cur_frame, ori_tok);
       }
-      (*toks_backfill_hclg_[cur_frame])[ori_tok->hclg_state] = ori_tok;
     }
 
     // iterator all links
     for (ForwardLink *link = ori_tok->links; link != NULL; link = link->next) {
       Token *next_tok = link->next_tok;
-      int32 new_frame_index = link->ilabel ? cur_frame+1 : cur_frame;
+      int32 new_frame_index = link->ilabel ? cur_frame + 1 : cur_frame;
       PairId next_pair_id = ConstructPair(next_tok->hclg_state,
                                           next_tok->lm_state);
       BaseFloat new_tot_cost = next_tok->tot_cost - diff;
       ProcessBetterExistingToken(new_frame_index, next_pair_id, new_tot_cost);
     }
-    ori_tok->shadowing_tok = NULL;
+    */
   }
-
+  
   void ProcessBetterHCLGToken(int32 cur_frame, Token *better_token) {
-    if (cur_frame >= active_toks_.size()) {  // have already expand to newest
-                                             // frame
+    if (cur_frame > active_toks_.size() - 1) {  // have already expand to newest
+                                                // frame
       return;
     }
 
     BuildBackfillMap(cur_frame);
     BuildBackfillMap(cur_frame+1);
+
     // Get previous best one
     Token *pre_best_hclg_tok =
       (*toks_backfill_hclg_[cur_frame])[better_token->hclg_state];
 
+    if (better_token == pre_best_hclg_tok) {
+      return;
+    }
+/*
+    std::cout << "Case2: Frame " << cur_frame
+              << " HCLG_id is " << better_token->hclg_state
+              << " LM_id is " << better_token->lm_state
+              << " . And previous best HCLG_id is " << pre_best_hclg_tok->hclg_state
+              << " LM_id is " << pre_best_hclg_tok->lm_state << std::endl;
+*/
     // iterator all links in previous best token
     for (ForwardLink *link = pre_best_hclg_tok->links; link != NULL;
          link = link->next) {
@@ -1452,11 +1499,8 @@ class Lattice2BiglmFasterDecoder {
       // state，but it gives that state a better forward cost than before.
       if (exist_flag && tot_cost <
           (*toks_backfill_pair_[new_frame_index])[new_pair]->tot_cost) {
-        // Update the link
-        link->graph_cost = graph_cost;
         // Update the destination token
         ProcessBetterExistingToken(new_frame_index, new_pair, tot_cost);
-        continue;
       }
 
       Token* new_tok;
@@ -1481,13 +1525,34 @@ class Lattice2BiglmFasterDecoder {
       // Special case: A previously unseen state was created that has a higher
       // probability than an existing copy of the same HCLG.fst state.
       if (tot_cost <
-          (*toks_backfill_hclg_[new_frame_index])[new_hclg_state]->tot_cost) {
-        ProcessBetterHCLGToken(new_frame_index, new_tok);
-        continue;
+        (*toks_backfill_hclg_[new_frame_index])[new_hclg_state]->tot_cost) {
+          ProcessBetterHCLGToken(new_frame_index, new_tok);
+      } else {
+        if (!exist_flag) {
+          new_tok->shadowing_tok =
+            (*toks_backfill_hclg_[new_frame_index])[new_hclg_state];
+        }
       }
     }  // end of for loop
 
-    // Update 
+    // As the expanding process may cause "best_hclg_tok" change, so we
+    // reacquire it.
+    pre_best_hclg_tok =
+      (*toks_backfill_hclg_[cur_frame])[better_token->hclg_state];
+
+    // Update the exploring list
+    if (cur_frame == active_toks_.size() - 1) {
+      HashList<StateId, Token*> &toks_shadowing_mod =
+        toks_shadowing_[cur_frame % 2];
+      StateId state = better_token->hclg_state;
+      Elem_Shadow *elem = toks_shadowing_mod.Find(state);
+      KALDI_ASSERT(elem);
+      KALDI_ASSERT(elem->val == pre_best_hclg_tok);
+      elem->val = better_token;
+      pre_best_hclg_tok->shadowing_tok = better_token;
+    }
+
+    // Update
     (*toks_backfill_hclg_[cur_frame])[better_token->hclg_state] = better_token;
     better_token->shadowing_tok = NULL;  // already expand
   }
