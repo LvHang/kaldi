@@ -1,6 +1,7 @@
 // decoder/lattice2-biglm-faster-decoder.h
 
-// Copyright      2018  Hang Lyu  Zhehuai Chen
+// Copyright      2018  Zhehuai Chen
+//                      Hang Lyu
 
 // See ../../COPYING for clarification regarding multiple authors
 //
@@ -28,72 +29,11 @@
 #include "fstext/fstext-lib.h"
 #include "lat/kaldi-lattice.h"
 #include "decoder/lattice-faster-decoder.h" // for options.
-#include "base/timer.h"
 
 namespace kaldi {
 
-struct Lattice2BiglmFasterDecoderConfig{
-  BaseFloat beam;
-  int32 max_active;
-  int32 min_active;
-  BaseFloat lattice_beam;
-  int32 prune_interval;
-  bool determinize_lattice; // not inspected by this class... used in
-                            // command-line program.
-  BaseFloat beam_delta; // has nothing to do with beam_ratio
-  BaseFloat hash_ratio;
-  BaseFloat expand_beam;
-  BaseFloat prune_scale;   // Note: we don't make this configurable on the command line,
-                           // it's not a very important parameter.  It affects the
-                           // algorithm that prunes the tokens as we go.
-  // Most of the options inside det_opts are not actually queried by the
-  // LatticeFasterDecoder class itself, but by the code that calls it, for
-  // example in the function DecodeUtteranceLatticeFaster.
-  fst::DeterminizeLatticePhonePrunedOptions det_opts;
-  int better_hclg;
-  int explore_interval;
-
-  Lattice2BiglmFasterDecoderConfig(): beam(16.0),
-                                max_active(std::numeric_limits<int32>::max()),
-                                min_active(200),
-                                lattice_beam(10.0),
-                                prune_interval(25),
-                                determinize_lattice(true),
-                                beam_delta(0.5),
-                                hash_ratio(2.0),
-                                expand_beam(16.0),
-                                prune_scale(0.1),
-  better_hclg(false), explore_interval(0) { }
-  void Register(OptionsItf *opts) {
-    det_opts.Register(opts);
-    opts->Register("beam", &beam, "Decoding beam.  Larger->slower, more accurate.");
-    opts->Register("max-active", &max_active, "Decoder max active states.  Larger->slower; "
-                   "more accurate");
-    opts->Register("min-active", &min_active, "Decoder minimum #active states.");
-    opts->Register("lattice-beam", &lattice_beam, "Lattice generation beam.  Larger->slower, "
-                   "and deeper lattices");
-    opts->Register("prune-interval", &prune_interval, "Interval (in frames) at "
-                   "which to prune tokens");
-    opts->Register("determinize-lattice", &determinize_lattice, "If true, "
-                   "determinize the lattice (lattice-determinization, keeping only "
-                   "best pdf-sequence for each word-sequence).");
-    opts->Register("beam-delta", &beam_delta, "Increment used in decoding-- this "
-                   "parameter is obscure and relates to a speedup in the way the "
-                   "max-active constraint is applied.  Larger is more accurate.");
-    opts->Register("hash-ratio", &hash_ratio, "Setting used in decoder to "
-                   "control hash behavior");
-    opts->Register("expand-beam", &expand_beam, "Expanding beam.");
-    opts->Register("better-hclg", &better_hclg, "Expanding better HCLG states.");
-    opts->Register("explore-interval", &explore_interval, "the interval between explore and expand.");
-  }
-  void Check() const {
-    KALDI_ASSERT(beam > 0.0 && max_active > 1 && lattice_beam > 0.0
-                 && prune_interval > 0 && beam_delta > 0.0 && hash_ratio >= 1.0
-                 && prune_scale > 0.0 && prune_scale < 1.0);
-  }
-};
-
-
+// The options are the same as for lattice-faster-decoder.h for now.
+typedef LatticeFasterDecoderConfig Lattice2BiglmFasterDecoderConfig;
 
 /** This is as LatticeFasterDecoder, but does online composition between
     HCLG and the "difference language model", which is a deterministic
@@ -131,9 +71,9 @@ class Lattice2BiglmFasterDecoder {
     ClearActiveTokens();
     // Clean up backfill map
     for (int32 frame = NumFramesDecoded(); frame >= 0; frame--) {
+      delete toks_backfill_pair_[frame];
       delete toks_backfill_hclg_[frame];
     }
-    KALDI_VLOG(1) << "time: " << expand_time_ << " " << propage_time_<< " " << ta_ << " " << tb_;
   }
 
   inline int32 NumFramesDecoded() const { return active_toks_.size() - 1; }
@@ -167,7 +107,7 @@ class Lattice2BiglmFasterDecoder {
   // Furthermore, the expanding will be related to current frame and next frame.
   // For judging the token has better cost or reaching existing token, we build
   // the backfill maps.
-  void ExpandShadowTokens(int32 frame, int32 frame_stop_expand, DecodableInterface *decodable, bool first=false);
+  void ExpandShadowTokens(int32 frame);
 
   /// says whether a final-state was active on the last frame.  If it was not, the
   /// lattice (or traceback) will end with states that are not final-states.
@@ -265,21 +205,20 @@ class Lattice2BiglmFasterDecoder {
                          // will be expanded. In another word, if we prune the
                          // lattice on each frame rather than prune it periodly,
                          // we only expand the survived tokens after pruning.
-    bool in_queue;
    
     inline Token(BaseFloat tot_cost, BaseFloat extra_cost, ForwardLink *links,
                  Token *next, StateId lm_state, StateId hclg_state):
                  tot_cost(tot_cost), extra_cost(extra_cost), links(links),
                  next(next), shadowing_tok(NULL), lm_state(lm_state),
                  hclg_state(hclg_state),
-                 backward_cost(std::numeric_limits<BaseFloat>::infinity()), in_queue(0) {}
+                 backward_cost(std::numeric_limits<BaseFloat>::infinity()) {}
 
     inline Token(BaseFloat tot_cost, BaseFloat extra_cost, ForwardLink *links,
                  Token *next, StateId lm_state, StateId hclg_state,
                  BaseFloat backward_cost):
                  tot_cost(tot_cost), extra_cost(extra_cost), links(links),
                  next(next), shadowing_tok(NULL), lm_state(lm_state),
-                 hclg_state(hclg_state), backward_cost(backward_cost), in_queue(0) {}
+                 hclg_state(hclg_state), backward_cost(backward_cost) {}
 
 
     inline void DeleteForwardLinks() {
@@ -291,12 +230,6 @@ class Lattice2BiglmFasterDecoder {
       }
       links = NULL;
     }
-    inline bool operator < (const Token &other) const {
-      if (tot_cost == other.tot_cost) // this is important to garrenttee a single shadowing token
-        return lm_state < other.lm_state;
-      else return tot_cost < other.tot_cost;
-    }
-    inline bool operator > (const Token &other) const { return other < (*this); }
   };
   
   // head and tail of per-frame list of Tokens (list is in topological order),
@@ -318,8 +251,6 @@ class Lattice2BiglmFasterDecoder {
     if (new_sz > toks_.Size()) {
       toks_.SetSize(new_sz);
     }
-    HashList<StateId, Token*> &h = toks_shadowing_[NumFramesDecoded()%2];
-    if (new_sz > h.Size()) h.SetSize(new_sz);
   }
 
   // FindOrAddToken either locates a token in hash of toks_,
@@ -371,7 +302,7 @@ class Lattice2BiglmFasterDecoder {
   // it's called by PruneActiveTokens
   // all links, that have link_extra_cost > lattice_beam are pruned
   void PruneForwardLinks(int32 frame, bool *extra_costs_changed,
-                         bool *links_pruned, BaseFloat delta, bool is_expand);
+                         bool *links_pruned, BaseFloat delta);
 
   // PruneForwardLinksFinal is a version of PruneForwardLinks that we call
   // on the final frame.  If there are final tokens active, it uses
@@ -382,7 +313,7 @@ class Lattice2BiglmFasterDecoder {
   // [we don't do this in PruneForwardLinks because it would give us
   // a problem with dangling pointers].
   // It's called by PruneActiveTokens if any forward links have been pruned
-  void PruneTokensForFrame(int32 frame, bool is_expand);
+  void PruneTokensForFrame(int32 frame);
 
   // Go backwards through still-alive tokens, pruning them.  note: cur_frame is
   // where hash toks_ are (so we do not want to mess with it because these tokens
@@ -395,7 +326,7 @@ class Lattice2BiglmFasterDecoder {
 
   // Version of PruneActiveTokens that we call on the final frame.
   // Takes into account the final-prob of tokens.
-  void PruneActiveTokensFinal(int32 cur_frame, bool is_expand=false);
+  void PruneActiveTokensFinal(int32 cur_frame);
 
   /// Gets the weight cutoff.  Also counts the active tokens.
   BaseFloat GetCutoff(Elem *list_head, size_t *tok_count,
@@ -407,12 +338,8 @@ class Lattice2BiglmFasterDecoder {
     if (arc->olabel == 0) {
       return lm_state; // no change in LM state if no word crossed.
     } else { // Propagate in the LM-diff FST.
-      Timer timer;
-      propage_lm_num_++;
-      if (expanding_) propage_lm_expand_num_++;
       Arc lm_arc;
       bool ans = lm_diff_fst_->GetArc(lm_state, arc->olabel, &lm_arc);
-      propage_time_+=timer.Elapsed();
       if (!ans) { // this case is unexpected for statistical LMs.
         if (!warned_noarc_) {
           warned_noarc_ = true;
@@ -454,20 +381,8 @@ class Lattice2BiglmFasterDecoder {
   // The following variables are used to check the existing tokens and best
   // token in certain frame. It will build in function ExpandShadowTokens()
   // Each element in the vector corresponds to a frame(t).
-  // TODO: add comments: we only update toks_shadowing_ but not toks_backfill_hclg_
-  typedef std::unordered_map<StateId, Token*,
-          std::hash<StateId>, std::equal_to<StateId>,
-          fst::PoolAllocator<std::pair<const StateId, Token*> > > StateHash;
-  typedef std::unordered_map<PairId, Token*,
-          std::hash<PairId>, std::equal_to<PairId>,
-          fst::PoolAllocator<std::pair<const PairId, Token*> > > PairHash;
-  PairHash toks_backfill_pair_[2];
-  std::vector<StateHash* > toks_backfill_hclg_;
-  typedef std::pair<Token*, int32> QElem;
-  std::queue<QElem> expand_current_frame_queue_[2];
-  std::queue<QElem>& GetExpandQueue(int32 frame) { return expand_current_frame_queue_[frame%2]; }
-  PairHash& GetBackfillMap(int32 frame) { return toks_backfill_pair_[frame%2]; }
-  void InitDecoding();
+  std::vector<std::unordered_map<PairId, Token*>* > toks_backfill_pair_;
+  std::vector<std::unordered_map<StateId, Token*>* > toks_backfill_hclg_;
 
   // temp variable used to process special case. The pair is (t, state_id).
   // As we want to process the token which has smaller t index at first,
@@ -484,11 +399,6 @@ class Lattice2BiglmFasterDecoder {
 
 
   std::vector<TokenList> active_toks_; // Lists of tokens, indexed by
-  int32 ToksNum(int32 f) {
-    int32 c=0;
-    for (Token *t=active_toks_[f].toks; t; t=t->next) c++;
-    return c;
-  }
   // frame (members of TokenList are toks, must_prune_forward_links,
   // must_prune_tokens).
   std::vector<PairId> queue_;  // temp variable used in ProcessNonemitting,
@@ -547,20 +457,26 @@ class Lattice2BiglmFasterDecoder {
   // Actually, we only build the two maps for each frame once. Otherwise, in
   // ExpandShadowTokens(), it will be increased. In PruneTokenForFrame(), it
   // will be decreased.
-  void BuildBackfillMap(int32 frame, int32 frame_stop_expand, bool clear=false);
-  void BuildHCLGMapFromHash(int32 frame, bool append=true);
-  Token *ExpandShadowTokensSub(StateId ilabel, 
-    StateId new_hclg_state, StateId new_lm_state, int32 frame, 
-    int32 new_frame_index, BaseFloat tot_cost, BaseFloat extra_cost, BaseFloat backward_cost,
-    bool is_last);
+  void BuildBackfillMap(int32 frame);
+
+  // A recursive function. This can happen when LM histories merge, if a 
+  // previously un-promising path became better.  Before further exploration, 
+  // propagate the change in cost forward through the lattice until it reaches
+  // the current frame, so that we can decode with up-to-date alphas.
+  void ProcessBetterExistingToken(int32 cur_frame, PairId new_pair_id,
+                                  BaseFloat new_tot_cost);
+
+  // A recursive function. Propagate this state and its successors untill
+  // current frame.
+  void ProcessBetterHCLGToken(int32 cur_frame, Token *better_token);
+
+  // Update the Backward cost of each token. Assume the current frame is the
+  // fake final frame. Iterator frame-1 to 0. For each token, the formula is
+  // tok->backward_cost = min(next_tok->backward_cost + link->graph +
+  // link->acoustic)
+  void UpdateBackwardCost(int32 cur_frame, BaseFloat delta);
 
   Vector<BaseFloat> cutoff_;
-  uint64 propage_lm_num_;
-  uint64 propage_lm_expand_num_;
-  bool expanding_;
-  double expand_time_;
-  double propage_time_;
-  double ta_, tb_;
 };
 
 } // end namespace kaldi.

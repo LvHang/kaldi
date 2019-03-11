@@ -25,8 +25,6 @@
 #include "fstext/fstext-lib.h"
 #include "decoder/decoder-wrappers.h"
 #include "decoder/decodable-matrix.h"
-#include "lm/const-arpa-lm.h"
-#include "rnnlm/rnnlm-lattice-rescoring.h"
 #include "base/timer.h"
 #include "decoder/lattice2-biglm-faster-decoder.h"
 
@@ -162,26 +160,14 @@ int main(int argc, char *argv[]) {
     bool allow_partial = false;
     BaseFloat acoustic_scale = 0.1;
     Lattice2BiglmFasterDecoderConfig config;
-    int32 max_ngram_order = 4;
-    rnnlm::RnnlmComputeStateComputationOptions rnn_opts;
-    bool use_carpa = false;
     
-    std::string word_syms_filename, word_embedding_rxfilename;
+    std::string word_syms_filename;
     config.Register(&po);
-    rnn_opts.Register(&po);
     po.Register("acoustic-scale", &acoustic_scale, "Scaling factor for acoustic likelihoods");
 
     po.Register("word-symbol-table", &word_syms_filename, "Symbol table for words [for debug output]");
     po.Register("allow-partial", &allow_partial, "If true, produce output even if end state was not reached.");
-    po.Register("use-const-arpa", &use_carpa, "If true, read the old-LM file "
-             "as a const-arpa file as opposed to an FST file");
-    po.Register("word-embedding-rxfilename", &word_embedding_rxfilename, "If set, use rnnlm");
-    po.Register("max-ngram-order", &max_ngram_order,
-        "If positive, allow RNNLM histories longer than this to be identified "
-        "with each other for rescoring purposes (an approximation that "
-        "saves time and reduces output lattice size).");
-
- 
+    
     po.Read(argc, argv);
 
     if (po.NumArgs() < 6 || po.NumArgs() > 8) {
@@ -201,39 +187,17 @@ int main(int argc, char *argv[]) {
     TransitionModel trans_model;
     ReadKaldiObject(model_in_filename, &trans_model);
 
-    VectorFst<StdArc> *old_lm_fst = fst::ReadAndPrepareLmFst(
-        old_lm_fst_rxfilename);
+    VectorFst<StdArc> *old_lm_fst = fst::CastOrConvertToVectorFst(
+        fst::ReadFstKaldiGeneric(old_lm_fst_rxfilename));
+    ApplyProbabilityScale(-1.0, old_lm_fst); // Negate old LM probs...
+    
+    VectorFst<StdArc> *new_lm_fst = fst::CastOrConvertToVectorFst(
+        fst::ReadFstKaldiGeneric(new_lm_fst_rxfilename));
+
     fst::BackoffDeterministicOnDemandFst<StdArc> old_lm_dfst(*old_lm_fst);
-    fst::ScaleDeterministicOnDemandFst old_lm_sdfst(-1,
-                                                  &old_lm_dfst);
-
-    fst::DeterministicOnDemandFst<StdArc>* new_lm_dfst = NULL;
-    VectorFst<StdArc> *new_lm_fst = NULL; 
-    ConstArpaLm* const_arpa = NULL;
-    CuMatrix<BaseFloat>* word_embedding_mat = NULL;
-    kaldi::nnet3::Nnet *rnnlm = NULL;
-    const rnnlm::RnnlmComputeStateInfo *info = NULL;
-
-    if (word_embedding_rxfilename!="") {
-      rnnlm = new kaldi::nnet3::Nnet();
-      word_embedding_mat = new CuMatrix<BaseFloat>();
-      ReadKaldiObject(word_embedding_rxfilename, word_embedding_mat);
-      ReadKaldiObject(new_lm_fst_rxfilename, rnnlm);
-      info = new rnnlm::RnnlmComputeStateInfo(rnn_opts, *rnnlm, *word_embedding_mat);
-      new_lm_dfst = new rnnlm::KaldiRnnlmDeterministicFst(max_ngram_order, *info);
-    } else if (use_carpa) {
-      const_arpa = new ConstArpaLm();
-      ReadKaldiObject(new_lm_fst_rxfilename, const_arpa);
-      new_lm_dfst = new ConstArpaLmDeterministicFst(*const_arpa);
-    } else {
-      new_lm_fst = fst::ReadAndPrepareLmFst(
-          new_lm_fst_rxfilename);
-      new_lm_dfst =
-        new fst::BackoffDeterministicOnDemandFst<StdArc>(*new_lm_fst);
-    }
-
-    fst::ComposeDeterministicOnDemandFst<StdArc> compose_dfst(&old_lm_sdfst,
-                                                              new_lm_dfst);
+    fst::BackoffDeterministicOnDemandFst<StdArc> new_lm_dfst(*new_lm_fst);
+    fst::ComposeDeterministicOnDemandFst<StdArc> compose_dfst(&old_lm_dfst,
+                                                              &new_lm_dfst);
     fst::CacheDeterministicOnDemandFst<StdArc> cache_dfst(&compose_dfst, 1e7);
 
     bool determinize = config.determinize_lattice;
@@ -257,7 +221,6 @@ int main(int argc, char *argv[]) {
     double tot_like = 0.0;
     kaldi::int64 frame_count = 0;
     int num_success = 0, num_fail = 0;
-    double elapsed = 0;
 
 
     if (ClassifyRspecifier(fst_in_str, NULL, NULL) == kNoRspecifier) {
@@ -292,13 +255,13 @@ int main(int argc, char *argv[]) {
             num_success++;
           } else num_fail++;
         }
-        elapsed = timer.Elapsed();
       }
       delete decode_fst; // delete this only after decoder goes out of scope.
     } else { // We have different FSTs for different utterances.
       assert(0);
     }
       
+    double elapsed = timer.Elapsed();
     KALDI_LOG << "Time taken "<< elapsed
               << "s: real-time factor assuming 100 frames/sec is "
               << (elapsed*100.0/frame_count);
@@ -308,14 +271,6 @@ int main(int argc, char *argv[]) {
               << frame_count<<" frames.";
 
     delete word_syms;
-
-    delete const_arpa;
-    delete new_lm_fst;
-    delete new_lm_dfst;
-    delete word_embedding_mat;
-    delete rnnlm;
-    delete info;
-
     if (num_success != 0) return 0;
     else return 1;
   } catch(const std::exception &e) {
