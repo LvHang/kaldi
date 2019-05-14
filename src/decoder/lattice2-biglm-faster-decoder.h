@@ -37,7 +37,9 @@ struct Lattice2BiglmFasterDecoderConfig{
   int32 max_active;
   int32 min_active;
   BaseFloat lattice_beam;
-  int32 prune_interval;
+  int32 backfill_interval;
+  int32 beta_interval;
+  int32 expand_best_interval;
   bool determinize_lattice; // not inspected by this class... used in
                             // command-line program.
   BaseFloat beam_delta; // has nothing to do with beam_ratio
@@ -50,14 +52,14 @@ struct Lattice2BiglmFasterDecoderConfig{
   // LatticeFasterDecoder class itself, but by the code that calls it, for
   // example in the function DecodeUtteranceLatticeFaster.
   fst::DeterminizeLatticePhonePrunedOptions det_opts;
-  int better_hclg;
-  int explore_interval;
 
   Lattice2BiglmFasterDecoderConfig(): beam(16.0),
                                 max_active(std::numeric_limits<int32>::max()),
                                 min_active(200),
                                 lattice_beam(10.0),
-                                prune_interval(25),
+                                backfill_interval(5),
+                                beta_interval(15),
+                                expand_best_interval(10),
                                 determinize_lattice(true),
                                 beam_delta(0.5),
                                 hash_ratio(2.0),
@@ -67,13 +69,17 @@ struct Lattice2BiglmFasterDecoderConfig{
   void Register(OptionsItf *opts) {
     det_opts.Register(opts);
     opts->Register("beam", &beam, "Decoding beam.  Larger->slower, more accurate.");
-    opts->Register("max-active", &max_active, "Decoder max active states.  Larger->slower; "
-                   "more accurate");
+    opts->Register("max-active", &max_active, "Decoder max active states. "
+                   "Larger->slower; more accurate");
     opts->Register("min-active", &min_active, "Decoder minimum #active states.");
-    opts->Register("lattice-beam", &lattice_beam, "Lattice generation beam.  Larger->slower, "
-                   "and deeper lattices");
-    opts->Register("prune-interval", &prune_interval, "Interval (in frames) at "
-                   "which to prune tokens");
+    opts->Register("lattice-beam", &lattice_beam, "Lattice generation beam. "
+                   "Larger->slower, and deeper lattices");
+    opts->Register("backfill-interval", &backfill_interval, "Interval (in "
+                   "frames) at which to do backfill.");
+    opts->Register("beta-interval", &beta_interval, "Interval (in frames) at "
+                   "which to compute betas.");
+    opts->Register("expand-best-interval", &expand_best_interval, "Interval "
+                   "(in frame) at which to only expand best-in-class tokens.");
     opts->Register("determinize-lattice", &determinize_lattice, "If true, "
                    "determinize the lattice (lattice-determinization, keeping only "
                    "best pdf-sequence for each word-sequence).");
@@ -82,13 +88,10 @@ struct Lattice2BiglmFasterDecoderConfig{
                    "max-active constraint is applied.  Larger is more accurate.");
     opts->Register("hash-ratio", &hash_ratio, "Setting used in decoder to "
                    "control hash behavior");
-    opts->Register("expand-beam", &expand_beam, "Expanding beam.");
-    opts->Register("better-hclg", &better_hclg, "Expanding better HCLG states.");
-    opts->Register("explore-interval", &explore_interval, "the interval between explore and expand.");
   }
   void Check() const {
     KALDI_ASSERT(beam > 0.0 && max_active > 1 && lattice_beam > 0.0
-                 && prune_interval > 0 && beam_delta > 0.0 && hash_ratio >= 1.0
+                 && backfill_interval > 0 && beam_delta > 0.0 && hash_ratio >= 1.0
                  && prune_scale > 0.0 && prune_scale < 1.0);
   }
 };
@@ -109,7 +112,8 @@ class Lattice2BiglmFasterDecoder {
   typedef fst::StdArc Arc;
   typedef Arc::Label Label;
   typedef Arc::StateId StateId;
-  // A PairId will be constructed as: (StateId in fst) + (StateId in lm_diff_fst) << 32;
+  // A PairId will be constructed as:
+  // (StateId in fst) + (StateId in lm_diff_fst) << 32;
   typedef uint64 PairId;
   typedef Arc::Weight Weight;
 
@@ -119,23 +123,29 @@ class Lattice2BiglmFasterDecoder {
       const Lattice2BiglmFasterDecoderConfig &config,
       fst::DeterministicOnDemandFst<fst::StdArc> *lm_diff_fst);
 
-  void SetOptions(const Lattice2BiglmFasterDecoderConfig &config) { config_ = config; } 
-  
+
+  void SetOptions(const Lattice2BiglmFasterDecoderConfig &config) {
+    config_ = config;
+  }
+
   Lattice2BiglmFasterDecoderConfig GetOptions() { return config_; } 
-  
+
+/*
   // Clean up backfill map
   void ClearHCLGMap() {
     for (auto e:toks_backfill_hclg_) delete e;
     toks_backfill_hclg_.resize(0);
   }
+*/
+
   // Releases the HashList and Backfill Maps which are created by 
   // BuildBackfillMap()
   ~Lattice2BiglmFasterDecoder() {
-    DeleteElems(toks_.Clear());
-    for (int i = 0; i < 2; i++) DeleteElemsShadow(toks_shadowing_[i]);
+    //for (int i = 0; i < 2; i++) DeleteElemsShadow(toks_shadowing_[i]);
     ClearActiveTokens();
-    ClearHCLGMap();
-    KALDI_VLOG(1) << "time: " << expand_time_ << " " << propage_time_<< " " << ta_ << " " << tb_;
+    //ClearHCLGMap();
+    //KALDI_VLOG(1) << "time: " << expand_time_ << " " << propage_time_
+    //              << " " << ta_ << " " << tb_;
   }
 
   inline int32 NumFramesDecoded() const { return active_toks_.size() - 1; }
@@ -143,7 +153,7 @@ class Lattice2BiglmFasterDecoder {
   // Returns true if any kind of traceback is available (not necessarily from
   // a final state).
   bool Decode(DecodableInterface *decodable);
-  bool Decode(DecodableInterface *decodable, const Vector<BaseFloat> &cutoff);
+  //bool Decode(DecodableInterface *decodable, const Vector<BaseFloat> &cutoff);
 
   // The core code of this method. We split this method into two stage --
   // exploration stage and backfill stage. In the exploration stage, we only
@@ -169,7 +179,11 @@ class Lattice2BiglmFasterDecoder {
   // Furthermore, the expanding will be related to current frame and next frame.
   // For judging the token has better cost or reaching existing token, we build
   // the backfill maps.
-  void ExpandShadowTokens(int32 frame, int32 frame_stop_expand, DecodableInterface *decodable, bool first=false);
+  /*
+  void ExpandShadowTokens(int32 frame, int32 frame_stop_expand,
+                          DecodableInterface *decodable, bool first=false);
+  */
+
 
   /// says whether a final-state was active on the last frame.  If it was not, the
   /// lattice (or traceback) will end with states that are not final-states.
@@ -189,10 +203,12 @@ class Lattice2BiglmFasterDecoder {
     return true;
   }
 
+
   // Outputs an FST corresponding to the raw, state-level
   // tracebacks.
   bool GetRawLattice(fst::MutableFst<LatticeArc> *ofst,
                      bool use_final_probs = true) const;
+
 
   // This function is now deprecated, since now we do determinization from
   // outside the LatticeBiglmFasterDecoder class.
@@ -200,6 +216,21 @@ class Lattice2BiglmFasterDecoder {
   // lattice (one path per word sequence).
   bool GetLattice(fst::MutableFst<CompactLatticeArc> *ofst,
                   bool use_final_probs = true) const;
+
+  // This function may be called when you do not plan to decode any further.
+  // It does an extra pruning step that
+  // will help to prune the lattices output by GetLattice and (particularly)
+  // GetRawLattice more accurately, particularly toward the end of the
+  // utterance.  It does this by using the final-probs in pruning (if any
+  // final-state survived); it also does a final pruning step that visits all
+  // states (the pruning that is done during decoding may fail to prune states
+  // that are within kPruningScale = 0.1 outside of the beam).  If you call
+  // this, you cannot call AdvanceDecoding again (it will fail), and you
+  // cannot call GetLattice() and related functions with use_final_probs =
+  // false.
+  // Used to be called PruneActiveTokensFinal().
+  void FinalizeDecoding();
+
  
  private:
   inline PairId ConstructPair(StateId fst_state, StateId lm_state) {
@@ -212,7 +243,6 @@ class Lattice2BiglmFasterDecoder {
   static inline StateId PairToLmState(PairId state_pair) {
     return static_cast<StateId>(static_cast<uint32>(state_pair >> 32));
   }
-  
   struct Token;
   // ForwardLinks are the links from a token to a token on the next frame.
   // or sometimes on the current frame (for input-epsilon links).
@@ -234,6 +264,7 @@ class Lattice2BiglmFasterDecoder {
         next(next), graph_cost_ori(graph_cost_ori) {}
   };  
   
+
   // Token is what's resident in a particular state at a particular time.
   // In this decoder a Token actually contains *forward* links.
   // When first created, a Token just has the (total) cost.    We add forward
@@ -250,9 +281,6 @@ class Lattice2BiglmFasterDecoder {
     ForwardLink *links; // Head of singly linked list of ForwardLinks
     
     Token *next; // Next in list of tokens for this frame.
-    Token *shadowing_tok;  // If it is NULL, it means the token is expanded or
-                           // it is processed in exploration stage. If it isn't
-                           // NULL, it points the token who shadows the token.
 
     // The following two states are used to record the hclg_state id and
     // lm_state id in current token. They will be used in expanding shadowed
@@ -268,21 +296,29 @@ class Lattice2BiglmFasterDecoder {
                          // lattice on each frame rather than prune it periodly,
                          // we only expand the survived tokens after pruning.
     bool in_queue;
+
+    bool expanded;  // If true, it means we have followed the states in the
+                    // composed graph and looked at the successor tokens. (If
+                    // a token's expanded is true and has no arcs out of it, it
+                    // means that we tried to follow them they did not meet the
+                    // beam, or they were pruned.
+    bool update_alpha;  // Indicate the token's tot_cost is updated or not when
+                        // we expand shadowed token.
    
     inline Token(BaseFloat tot_cost, BaseFloat extra_cost, ForwardLink *links,
                  Token *next, StateId lm_state, StateId hclg_state):
                  tot_cost(tot_cost), extra_cost(extra_cost), links(links),
-                 next(next), shadowing_tok(NULL), lm_state(lm_state),
-                 hclg_state(hclg_state),
-                 backward_cost(std::numeric_limits<BaseFloat>::infinity()), in_queue(0) {}
+                 next(next), lm_state(lm_state), hclg_state(hclg_state),
+                 backward_cost(0), in_queue(false), expanded(false),
+                 update_alpha(false) {}
 
     inline Token(BaseFloat tot_cost, BaseFloat extra_cost, ForwardLink *links,
                  Token *next, StateId lm_state, StateId hclg_state,
                  BaseFloat backward_cost):
                  tot_cost(tot_cost), extra_cost(extra_cost), links(links),
-                 next(next), shadowing_tok(NULL), lm_state(lm_state),
-                 hclg_state(hclg_state), backward_cost(backward_cost), in_queue(0) {}
-
+                 next(next), lm_state(lm_state), hclg_state(hclg_state),
+                 backward_cost(backward_cost), in_queue(false), 
+                 expanded(false), update_alpha(false) {}
 
     inline void DeleteForwardLinks() {
       ForwardLink *l = links, *m; 
@@ -293,11 +329,17 @@ class Lattice2BiglmFasterDecoder {
       }
       links = NULL;
     }
+
     inline bool operator < (const Token &other) const {
-      if (tot_cost == other.tot_cost) // this is important to garrenttee a single shadowing token
+      if ((tot_cost + backward_cost) ==
+          (other.tot_cost + other.backward_cost)) // this is important to 
+                                                  // garrenttee a single
+                                                  // shadowing token
         return lm_state < other.lm_state;
-      else return tot_cost < other.tot_cost;
+      else return (tot_cost + backward_cost) <
+                  (other.tot_cost + other.backward_cost);
     }
+
     inline bool operator > (const Token &other) const { return other < (*this); }
   };
   
@@ -311,6 +353,18 @@ class Lattice2BiglmFasterDecoder {
                  must_prune_tokens(true) { }
   };
 
+  using PairIdToTokenMap = typename std::unordered_map<PairId, Token*>;
+  //using PairIdToTokenMap = typename std::unordered_map<PairId, Token*,
+  //      std::hash<PairId>, std::equal_to<PairId>,
+  //      fst::PoolAllocator<std::pair<const PairId, Token*> > >;
+  using StateIdToTokenMap = typename std::unordered_map<StateId, Token*>;
+  //using StateIdToTokenMap = typename std::unordered_map<StateId, Token*,
+  //      std::hash<StateId>, std::equal_to<StateId>,
+  //      fst::PoolAllocator<std::pair<const StateId, Token*> > >;
+
+
+ 
+/*
   typedef HashList<PairId, Token*>::Elem Elem;
   typedef HashList<StateId, Token*>::Elem ElemShadow;
 
@@ -323,52 +377,17 @@ class Lattice2BiglmFasterDecoder {
     HashList<StateId, Token*> &h = toks_shadowing_[NumFramesDecoded()%2];
     if (new_sz > h.Size()) h.SetSize(new_sz);
   }
+*/
 
   // FindOrAddToken either locates a token in hash of toks_,
   // or if necessary inserts a new, empty token (i.e. with no forward links)
   // for the current frame.  [note: it's inserted if necessary into hash toks_
   // and also into the singly linked list of tokens active on this frame
   // (whose head is at active_toks_[frame]).
-  inline Token *FindOrAddToken(PairId state_pair, int32 frame, BaseFloat tot_cost,
-                               bool emitting, bool *changed) {
-    // Returns the Token pointer.  Sets "changed" (if non-NULL) to true
-    // if the token was newly created or the cost changed.
-    KALDI_ASSERT(frame < active_toks_.size());
-    Token *&toks = active_toks_[frame].toks;
-    Elem *e_found = toks_.Find(state_pair);
-    if (e_found == NULL) { // no such token presently.
-      const BaseFloat extra_cost = 0.0;
-      // tokens on the currently final frame have zero extra_cost
-      // as any of them could end up
-      // on the winning path.
-      Token *new_tok = new Token(tot_cost, extra_cost, NULL, toks,
-                                 PairToLmState(state_pair),
-                                 PairToState(state_pair));
-      // NULL: no forward links yet
-      toks = new_tok;
-      num_toks_++;
-      toks_.Insert(state_pair, new_tok);
-      if (changed) *changed = true;
-      return new_tok;
-    } else {
-      Token *tok = e_found->val; // There is an existing Token for this state.
-      if (tok->tot_cost > tot_cost) { // replace old token
-        tok->tot_cost = tot_cost;
-        // we don't allocate a new token, the old stays linked in active_toks_
-        // we only replace the tot_cost
-        // in the current frame, there are no forward links (and no extra_cost)
-        // only in ProcessNonemitting we have to delete forward links
-        // in case we visit a state for the second time
-        // those forward links, that lead to this replaced token before:
-        // they remain and will hopefully be pruned later (PruneForwardLinks...)
-        if (changed) *changed = true;
-      } else {
-        if (changed) *changed = false;
-      }
-      return tok;
-    }
-  }
-  
+  inline Token *FindOrAddToken(PairId state_pair, int32 frame,
+                               BaseFloat tot_cost,
+                               PairIdToTokenMap *token_map, bool *changed);
+ 
   // prunes outgoing links for all tokens in active_toks_[frame]
   // it's called by PruneActiveTokens
   // all links, that have link_extra_cost > lattice_beam are pruned
@@ -399,9 +418,9 @@ class Lattice2BiglmFasterDecoder {
   // Takes into account the final-prob of tokens.
   void PruneActiveTokensFinal(int32 cur_frame, bool is_expand=false);
 
-  /// Gets the weight cutoff.  Also counts the active tokens.
-  BaseFloat GetCutoff(Elem *list_head, size_t *tok_count,
-                      BaseFloat *adaptive_beam, Elem **best_elem);
+  /// Gets the weight cutoff.
+  BaseFloat GetCutoff(const StateIdToTokenMap &toks, BaseFloat *adaptive_beam,
+                      Token **best_token);
 
   // Update the graph cost according to lm_state and olabel
   inline StateId PropagateLm(StateId lm_state,
@@ -409,12 +428,12 @@ class Lattice2BiglmFasterDecoder {
     if (arc->olabel == 0) {
       return lm_state; // no change in LM state if no word crossed.
     } else { // Propagate in the LM-diff FST.
-      Timer timer;
-      propage_lm_num_++;
-      if (expanding_) propage_lm_expand_num_++;
+      //Timer timer;
+      //propage_lm_num_++;
+      //if (expanding_) propage_lm_expand_num_++;
       Arc lm_arc;
       bool ans = lm_diff_fst_->GetArc(lm_state, arc->olabel, &lm_arc);
-      propage_time_+=timer.Elapsed();
+      //propage_time_+=timer.Elapsed();
       if (!ans) { // this case is unexpected for statistical LMs.
         if (!warned_noarc_) {
           warned_noarc_ = true;
@@ -431,14 +450,38 @@ class Lattice2BiglmFasterDecoder {
       }      
     }
   }
- 
+
+
+  // Processes nonemitting (epsilon) arcs for one frame.
+  // Calls this function once when all frames were processed.
+  // Or calls it in GetRawLattice() to generate the complete token list for
+  // the last frame. [Deal With the tokens in map "cur_toks_" which would 
+  // only contains emittion tokens from previous frame.]
+  // If the map, "token_orig_cost", isn't NULL, we build the map which will
+  // be used to recover "active_toks_[last_frame]" token list for the last
+  // frame. 
+  void ProcessNonemitting(
+      std::unordered_map<Token*, BaseFloat> *token_orig_cost);
+
+/*
   // Processes emitting arcs for one frame in exploration stage.
   void ProcessEmitting(DecodableInterface *decodable, int32 frame);
 
   // Processes nonemitting (epsilon) arcs for one frame in exploration stage.
   // Called after Processemitting() on each frame.
   void ProcessNonemitting(int32 frame);
+*/
 
+  // Processes non-emitting (epsilon) arcs and emitting arcs for one frame
+  // together. It takes the emittion tokens in "prev_toks_" from last frame.
+  // Generates non-emitting tokens for previous frame and emitting tokens for
+  // next frame.
+  // Notice: The emitting tokens for the current frame means the token take
+  // acoustic scores of the current frame. (i.e. the destnations of emitting
+  // arcs.)
+  void ProcessForFrame(DecodableInterface *decodable);
+
+/*
   // HashList defined in ../util/hash-list.h.  It actually allows us to maintain
   // more than one list (e.g. for current and previous frames), but only one of
   // them at a time can be indexed by StateId.
@@ -447,6 +490,7 @@ class Lattice2BiglmFasterDecoder {
   // token for each state (i.e. the key is StateId rather than PairId) on 
   // previous and current frame. 
   HashList<StateId, Token*> toks_shadowing_[2];
+*/
 
   // When do expanding, we have two special cases need to be processed.
   // 1. An arc that we expand in backfill reaches an existing state，but it
@@ -460,6 +504,7 @@ class Lattice2BiglmFasterDecoder {
   // token in certain frame. It will build in function ExpandShadowTokens()
   // Each element in the vector corresponds to a frame(t).
   // TODO: add comments: we only update toks_shadowing_ but not toks_backfill_hclg_
+ /*
   typedef std::unordered_map<StateId, Token*,
           std::hash<StateId>, std::equal_to<StateId>,
           fst::PoolAllocator<std::pair<const StateId, Token*> > > StateHash;
@@ -474,8 +519,13 @@ class Lattice2BiglmFasterDecoder {
     return expand_current_frame_queue_[frame%2];
   }
   PairHash& GetBackfillMap(int32 frame) { return toks_backfill_pair_[frame%2]; }
+*/
+
+  // Initalize
   void InitDecoding();
 
+
+/*
   // temp variable used to process special case. The pair is (t, state_id).
   // As we want to process the token which has smaller t index at first,
   // so we use a priority_queue
@@ -488,30 +538,19 @@ class Lattice2BiglmFasterDecoder {
   std::priority_queue<std::pair<int32, PairId>,
                       std::vector<std::pair<int32, PairId> >,
                       PriorityCompare> tmp_expand_queue_;
-
+*/
 
   std::vector<TokenList> active_toks_; // Lists of tokens, indexed by
+
+  // Use to count the number of tokens
   int32 ToksNum(int32 f) {
     int32 c=0;
     for (Token *t=active_toks_[f].toks; t; t=t->next) c++;
     return c;
   }
-  // frame (members of TokenList are toks, must_prune_forward_links,
-  // must_prune_tokens).
-  std::vector<PairId> queue_;  // temp variable used in ProcessNonemitting,
-  std::vector<BaseFloat> tmp_array_;  // used in GetCutoff.
-  // make it class member to avoid internal new/delete.
-  const fst::Fst<fst::StdArc> &fst_;
-  fst::DeterministicOnDemandFst<fst::StdArc> *lm_diff_fst_;  
-  Lattice2BiglmFasterDecoderConfig config_;
-  bool warned_noarc_;  
-  int32 num_toks_; // current total #toks allocated...
-  bool warned_;
-  bool final_active_; // use this to say whether we found active final tokens
-  // on the last frame.
-  std::map<Token*, BaseFloat> final_costs_; // A cache of final-costs
-  // of tokens on the last frame-- it's just convenient to store it this way.
-  
+
+
+/*  
   // It might seem unclear why we call DeleteElems(toks_.Clear()).
   // There are two separate cleanup tasks we need to do at when we start a new file.
   // one is to delete the Token objects in the list; the other is to delete
@@ -531,7 +570,7 @@ class Lattice2BiglmFasterDecoder {
       toks.Delete(e);
     }
   }
-
+*/
   
   inline void ClearActiveTokens() { // a cleanup routine, at utt end/begin
     for (size_t i = 0; i < active_toks_.size(); i++) {
@@ -554,11 +593,13 @@ class Lattice2BiglmFasterDecoder {
   // Actually, we only build the two maps for each frame once. Otherwise, in
   // ExpandShadowTokens(), it will be increased. In PruneTokenForFrame(), it
   // will be decreased.
+/*
   void BuildBackfillMap(int32 frame, int32 frame_stop_expand, bool clear=false);
   void BuildHCLGMapFromHash(int32 frame, bool append=true);
   Token *ExpandShadowTokensSub(StateId ilabel, 
     StateId new_hclg_state, StateId new_lm_state, int32 frame, 
-    int32 new_frame_index, BaseFloat tot_cost, BaseFloat extra_cost, BaseFloat backward_cost,
+    int32 new_frame_index, BaseFloat tot_cost, BaseFloat extra_cost,
+    BaseFloat backward_cost,
     bool is_last);
 
   Vector<BaseFloat> cutoff_;
@@ -568,6 +609,63 @@ class Lattice2BiglmFasterDecoder {
   double expand_time_;
   double propage_time_;
   double ta_, tb_;
+*/
+  void DoBackfill();
+
+  // Compute the betas for a particular frame. Update best_token_map and
+  // Prune tokens that fall below the alpha + beta beam.
+  void ComputeBeta(int32 frame_index, BaseFloat delta);
+
+  // It does backfill arc expansion on frame. If "expand_not_best" is true then
+  // we will be expanding tokens even for not best-in-class tokens.
+  void ExpandForward(int32 frame, bool expand_not_best);
+
+  // The purpose of this function is to expand an un-expanded token using the
+  // acoustic scores from the best-in-class expanded tokens.
+  void ExpandTokenBackfill(int32 frame, Token* tok);
+
+  // frame (members of TokenList are toks, must_prune_forward_links,
+  // must_prune_tokens).
+  std::vector<PairId> queue_;  // temp variable used in ProcessNonemitting,
+  std::vector<BaseFloat> tmp_array_;  // used in GetCutoff.
+  
+  // make it class member to avoid internal new/delete.
+  const fst::Fst<fst::StdArc> &fst_;
+  fst::DeterministicOnDemandFst<fst::StdArc> *lm_diff_fst_;  
+  Lattice2BiglmFasterDecoderConfig config_;
+
+  bool warned_noarc_;
+  bool warned_;
+  bool final_active_; // use this to say whether we found active final tokens
+                      // on the last frame.
+  std::map<Token*, BaseFloat> final_costs_; // A cache of final-costs
+  // of tokens on the last frame-- it's just convenient to store it this way.
+  int32 num_toks_; // current total #toks allocated...
+
+  // decoding_finalized_ is true if someone called FinalizeDecoding().  [note,
+  // calling this is optional].  If true, it's forbidden to decode more.  Also,
+  // if this is set, then the output of ComputeFinalCosts() is in the next
+  // three variables.  The reason we need to do this is that after
+  // FinalizeDecoding() calls PruneTokensForFrame() for the final frame, some
+  // of the tokens on the last frame are freed, so we free the list from toks_
+  // to avoid having dangling pointers hanging around.
+  bool decoding_finalized_;
+
+  // Maps from the tuple (t, base_state, lm_state) to token 
+  std::vector<PairIdToTokenMap> token_map_;
+  // Maps from the tuple (t, base_state) to token. It has two purposes:
+  // (a) For "recent" frames, we only expand un-expanded tokens which are
+  // "best in class" (meaning the best token for the base_state.)
+  // (b) We will use the best token as part of the A* heuristic function when
+  // deciding which un-expanded tokens. To give an estimate of the beta score.
+  // Besides, in exploration stage, as beta is zero, the tokens in
+  // "best_token_map" are equivalent to best token in each base state. 
+  std::vector<StateIdToTokenMap> best_token_map_;
+  std::vector<Token*> best_token_;
+
+  std::queue<StateId> cur_queue_;  // temp variable used in ProcessForFrame
+                                   // and ProcessNonemitting
+  std::vector<BaseFloat> cost_offsets_;
 };
 
 } // end namespace kaldi.
