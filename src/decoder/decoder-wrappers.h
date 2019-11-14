@@ -22,6 +22,7 @@
 
 #include "itf/options-itf.h"
 #include "decoder/lattice-faster-decoder.h"
+#include "decoder/lattice-faster-decoder-map.h"
 #include "decoder/lattice-simple-decoder.h"
 
 // This header contains declarations from various convenience functions that are called
@@ -102,6 +103,22 @@ void ModifyGraphForCarefulAlignment(
 template <typename FST>
 bool DecodeUtteranceLatticeFaster(
     LatticeFasterDecoderTpl<FST> &decoder, // not const but is really an input.
+    DecodableInterface &decodable, // not const but is really an input.
+    const TransitionModel &trans_model,
+    const fst::SymbolTable *word_syms,
+    std::string utt,
+    double acoustic_scale,
+    bool determinize,
+    bool allow_partial,
+    Int32VectorWriter *alignments_writer,
+    Int32VectorWriter *words_writer,
+    CompactLatticeWriter *compact_lattice_writer,
+    LatticeWriter *lattice_writer,
+    double *like_ptr);  // puts utterance's likelihood in like_ptr on success.
+
+template <typename FST>
+bool DecodeUtteranceLatticeFasterMapVersion(
+    LatticeFasterMapDecoderTpl<FST> &decoder, // not const but is really an input.
     DecodableInterface &decodable, // not const but is really an input.
     const TransitionModel &trans_model,
     const fst::SymbolTable *word_syms,
