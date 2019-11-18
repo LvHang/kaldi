@@ -84,12 +84,17 @@ done
 
 sdata=$data/split$nj;
 cmvn_opts=`cat $srcdir/cmvn_opts` || exit 1;
+
 batch_string=
+gpu=
 if $use_gpu; then
-  if $use_batch; then
-    batch_string="-batch"
-  fi
   queue_opt="--gpu 1"
+  gpu="yes"
+else
+  gpu="no"
+fi
+if $use_batch; then
+  batch_string="-batch"
 fi
 
 ## Check data
@@ -144,7 +149,7 @@ if [ $stage -le 0 ]; then
      --extra-right-context=$extra_right_context \
      --extra-left-context-initial=$extra_left_context_initial \
      --extra-right-context-final=$extra_right_context_final \
-     --acoustic-scale=$acwt --use-gpu=$use_gpu \
+     --acoustic-scale=$acwt --use-gpu=$gpu \
      --use-priors=true \
      "$model" "$feats" "$posteriors" || exit 1;
 fi
@@ -161,7 +166,7 @@ if [ $stage -le 1 ]; then
     latgen-faster-mapped --acoustic-scale=$acwt --allow-partial=true \
       --beam=$beam --lattice-beam=$lattice_beam --max-active=$max_active \
       --min-active=$min_active --word-symbol-table=$graphdir/words.txt \
-      $srcdir/final.mdl $graphdir/HCLG.fst "$posteriors_rspecifier" "$lat_wspecifier" || exit 1;
+      "$model" $graphdir/HCLG.fst "$posteriors_rspecifier" "$lat_wspecifier" || exit 1;
 fi
 
 if [ $stage -le 2 ]; then
