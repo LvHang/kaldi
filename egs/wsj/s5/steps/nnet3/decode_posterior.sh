@@ -142,7 +142,7 @@ if [ $stage -le 0 ]; then
     frame_subsampling_opt="--frame-subsampling-factor=$(cat $srcdir/frame_subsampling_factor)"
   fi
 
-  $cmd $queue_opt JOB=1:$nj $dir/log/decode.JOB.log \
+  $cmd $queue_opt JOB=1:$nj $dir/log/nnet_compute.JOB.log \
     nnet3-compute$batch_string $ivector_opts $frame_subsampling_opt \
      --frames-per-chunk=$frames_per_chunk \
      --extra-left-context=$extra_left_context \
