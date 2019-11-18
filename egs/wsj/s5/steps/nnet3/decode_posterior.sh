@@ -100,17 +100,22 @@ fi
 ## Check data
 mkdir -p $dir/log
 data_ok=false
-if [ -z $data/feats.scp ]; then
+if [ -f $data/feats.scp ]; then
   [[ -d $sdata && $data/feats.scp -ot $sdata ]] || split_data.sh $data $nj || exit 1;
   echo $nj > $dir/num_jobs
   data_ok=true
   stage=0
 fi
-if [ $sdata/1/posteriors.scp ]; then
-  echo -n "Use the posteriors directly. Bear in mind, I just check the first "
-  echo "sub-dir. If you modify something, you need to re-generate it."
-  data_ok=true
+complete_posterior=true
+for i in `seq $nj`; do
+  if [ ! -f $sdata/$i/posterior.scp ]; then
+    complete_posterior=false
+  fi
+done
+if $complete_posterior; then
+  echo "Use the posteriors directly"
   stage=1
+  data_ok=true
 fi
 if ! $data_ok; then
   echo "$O: Neither posterior.scp nor feats.scp exists."
